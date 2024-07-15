@@ -18,9 +18,9 @@ from log import *
 
 # Arguments: binary
 DWARF = "/Users/jryans/Projects/LLVM/llvm/builds/release-clang-lldb/bin/llvm-dwarfdump --debug-line %s"
-# Arguments: script_path, binary
-GDB = "gdb -q -x %s %s"
-LLDB = "lldb -s %s %s"
+# Arguments: script_path, binary, program_args
+GDB = "gdb -q -x %s -- %s %s"
+LLDB = "lldb -s %s -- %s %s"
 
 # Arguments: bp_scripts
 GDB_SCRIPT_TEMPLATE = """python gdb.events.exited.connect(lambda x : gdb.execute("quit"))
@@ -78,7 +78,7 @@ def get_lines(binary_path):
     return list(lines)
 
 
-def run_dbg(binary, dbg_script, dbg):
+def run_dbg(binary, program_args, dbg_script, dbg):
 
     output = ""
 
@@ -94,7 +94,7 @@ def run_dbg(binary, dbg_script, dbg):
         # print(f"Binary: {binary}")
         # print(f"Script: {script_path}")
 
-        cmd = cmd_template % (script_path, binary)
+        cmd = cmd_template % (script_path, binary, program_args)
 
         # print(f"Command: {cmd}")
 
@@ -194,7 +194,7 @@ def get_variables_from_trace(trace, dbg):
     return output
 
 
-def get_traced_variables(binary, dbg="lldb"):
+def get_traced_variables(binary, program_args, dbg="lldb"):
     lines = get_lines(binary)
 
     script_template = [GDB_SCRIPT_TEMPLATE, LLDB_SCRIPT_TEMPLATE][dbg == "lldb"]
@@ -205,6 +205,6 @@ def get_traced_variables(binary, dbg="lldb"):
         bps = [GDB_BP_TEMPLATE % line for line in lines]
     dbg_script = script_template % "".join(bps)
 
-    trace = run_dbg(binary, dbg_script, dbg)
+    trace = run_dbg(binary, program_args, dbg_script, dbg)
 
     return get_variables_from_trace(trace, dbg)
