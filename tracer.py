@@ -62,8 +62,8 @@ def get_lines(binary_path):
     lines = set()
     dwarf_path = binary_path
     if platform.system() == "Darwin":
-        binary_file = os.path.basename(binary_path)
-        dwarf_path = f"{binary_path}.dSYM/Contents/Resources/DWARF/{binary_file}"
+        # TODO: Ask Spotlight to find debug info by UUID...?
+        dwarf_path = f"{binary_path}.dwarf"
     output = run_cmd(DWARF % dwarf_path, get_output=True)
     for line in output.split("\n"):
         if len(line.strip().split()) < 2:
