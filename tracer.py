@@ -16,13 +16,13 @@ from run import *
 from log import *
 
 
-# ARGS: binary
+# Arguments: binary
 DWARF = "/Users/jryans/Projects/LLVM/llvm/builds/release-clang-lldb/bin/llvm-dwarfdump --debug-line %s"
-# ARGS: dbg_script_path - binary
+# Arguments: script_path, binary
 GDB = "gdb -q -x %s %s"
 LLDB = "lldb -s %s %s"
 
-
+# Arguments: bp_scripts
 GDB_SCRIPT_TEMPLATE = """python gdb.events.exited.connect(lambda x : gdb.execute("quit"))
 set pagination off
 set style enabled off
@@ -33,6 +33,7 @@ run
 quit
 """
 
+# Arguments: line
 GDB_BP_TEMPLATE = """tbreak %d
 commands
     info locals
@@ -40,12 +41,14 @@ commands
 end
 """
 
+# Arguments: bp_scripts
 LLDB_SCRIPT_TEMPLATE = """%s
 
 run
 quit
 """
 
+# Arguments: line
 LLDB_BP_TEMPLATE = """tbreak %d
 break command add %d
     frame info
