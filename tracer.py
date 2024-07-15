@@ -7,14 +7,8 @@ import tempfile
 import platform
 import os.path
 
-
-from pathlib import Path
-
-sys.path.append(os.path.join(Path(__file__).resolve().parent, ".."))
-
 from run import *
 from log import *
-
 
 # Arguments: binary
 DWARF = "/Users/jryans/Projects/LLVM/llvm/builds/release-clang-lldb/bin/llvm-dwarfdump --debug-line %s"
