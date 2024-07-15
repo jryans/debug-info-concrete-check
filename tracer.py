@@ -194,7 +194,7 @@ def get_variables_from_trace(trace, dbg):
     return output
 
 
-def get_traced_variables(binary, dbg):
+def get_traced_variables(binary, dbg="lldb"):
     lines = get_lines(binary)
 
     script_template = [GDB_SCRIPT_TEMPLATE, LLDB_SCRIPT_TEMPLATE][dbg == "lldb"]
