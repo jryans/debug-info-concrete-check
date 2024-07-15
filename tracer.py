@@ -18,28 +18,9 @@ from log import *
 
 # Arguments: binary
 DWARF = "/Users/jryans/Projects/LLVM/llvm/builds/release-clang-lldb/bin/llvm-dwarfdump --debug-line %s"
+
 # Arguments: script_path, binary, program_args
-GDB = "gdb -q -x %s -- %s %s"
 LLDB = "lldb -s %s -- %s %s"
-
-# Arguments: bp_scripts
-GDB_SCRIPT_TEMPLATE = """python gdb.events.exited.connect(lambda x : gdb.execute("quit"))
-set pagination off
-set style enabled off
-
-%s
-
-run
-quit
-"""
-
-# Arguments: line
-GDB_BP_TEMPLATE = """tbreak %d
-commands
-    info locals
-    continue
-end
-"""
 
 # Arguments: bp_scripts
 LLDB_SCRIPT_TEMPLATE = """%s
@@ -78,14 +59,11 @@ def get_lines(binary_path):
     return list(lines)
 
 
-def run_dbg(binary, program_args, dbg_script, dbg):
-
+def run_dbg(binary, program_args, dbg_script):
     output = ""
-
-    cmd_template = [GDB, LLDB][dbg == "lldb"]
+    cmd_template = LLDB
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-
         script_file = str(random.randint(0, 2**32)) + ".dbg"
         script_path = os.path.join(tmp_dir, script_file)
         with open(script_path, "w") as f:
@@ -103,83 +81,51 @@ def run_dbg(binary, program_args, dbg_script, dbg):
     return output
 
 
-def get_variables_from_trace(trace, dbg):
-
+def get_variables_from_trace(trace):
     output = {}
 
     current_line = None
     for line in trace.split("\n"):
         line = line.strip()
 
-        if dbg == "gdb":
+        if (
+            "lldb" in line
+            or "Current" in line
+            or "Breakpoint" in line
+            or "Process" in line
+            or "Command" in line
+            or len(line.split()) == 0
+        ):
+            continue
+        if line.startswith("[") or line.startswith("*"):
+            continue
 
-            if (
-                "No locals" in line
-                or "Inferior" in line
-                or "Temporary" in line
-                or "Reading" in line
-                or len(line.split()) == 0
-            ):
-                continue
+        # Remove metadata shown by some LLDB versions that confuses the
+        # following steps
+        line = line.replace(" [opt]", "")
 
-            line_no = line.split()[0]
-            if line_no.isnumeric():
-                current_line = line_no
-                output[current_line] = {
-                    "available": [],
-                    "optimized_out": [],
-                    "not_available": [],
-                }
-                continue
+        line_no = line.split()[-1]
+        if ":" in line_no:
+            line_no = line_no.split(":")[-2]
+            current_line = line_no
+            output[current_line] = {
+                "available": [],
+                "optimized_out": [],
+                "not_available": [],
+            }
+            continue
 
-            if current_line and " = " in line:
-                var_name = line.split(" = ")[0]
-                value = line.split(" = ")[-1]
-                if "<optimized out>" in value:
-                    output[current_line]["optimized_out"].append(var_name)
-                else:
-                    output[current_line]["available"].append(var_name)
-
-        else:
-
-            if (
-                "lldb" in line
-                or "Current" in line
-                or "Breakpoint" in line
-                or "Process" in line
-                or "Command" in line
-                or len(line.split()) == 0
-            ):
-                continue
-            if line.startswith("[") or line.startswith("*"):
-                continue
-
-            # Remove metadata shown by some LLDB versions that confuses the
-            # following steps
-            line = line.replace(" [opt]", "")
-
-            line_no = line.split()[-1]
-            if ":" in line_no:
-                line_no = line_no.split(":")[-2]
-                current_line = line_no
-                output[current_line] = {
-                    "available": [],
-                    "optimized_out": [],
-                    "not_available": [],
-                }
-                continue
-
-            if current_line and " = " in line:
-                var_name = line.split(" = ")[0]
-                if var_name.startswith("("):
-                    var_name = var_name.split(")")[1].rstrip().lstrip()
-                value = line.split(" = ")[-1].rstrip().lstrip()
-                if "optimized out" in value:
-                    output[current_line]["optimized_out"].append(var_name)
-                elif "not available" in value:
-                    output[current_line]["not_available"].append(var_name)
-                else:
-                    output[current_line]["available"].append(var_name)
+        if current_line and " = " in line:
+            var_name = line.split(" = ")[0]
+            if var_name.startswith("("):
+                var_name = var_name.split(")")[1].rstrip().lstrip()
+            value = line.split(" = ")[-1].rstrip().lstrip()
+            if "optimized out" in value:
+                output[current_line]["optimized_out"].append(var_name)
+            elif "not available" in value:
+                output[current_line]["not_available"].append(var_name)
+            else:
+                output[current_line]["available"].append(var_name)
 
     for line in output:
         output[line]["optimized_out"] = list(set(output[line]["optimized_out"]))
@@ -194,17 +140,14 @@ def get_variables_from_trace(trace, dbg):
     return output
 
 
-def get_traced_variables(binary, program_args, dbg="lldb"):
+def get_traced_variables(binary, program_args):
     lines = get_lines(binary)
 
-    script_template = [GDB_SCRIPT_TEMPLATE, LLDB_SCRIPT_TEMPLATE][dbg == "lldb"]
+    script_template = LLDB_SCRIPT_TEMPLATE
+    bps = [LLDB_BP_TEMPLATE % (line, i + 1) for i, line in enumerate(lines)]
 
-    if dbg == "lldb":
-        bps = [LLDB_BP_TEMPLATE % (line, i + 1) for i, line in enumerate(lines)]
-    else:
-        bps = [GDB_BP_TEMPLATE % line for line in lines]
     dbg_script = script_template % "".join(bps)
 
-    trace = run_dbg(binary, program_args, dbg_script, dbg)
+    trace = run_dbg(binary, program_args, dbg_script)
 
-    return get_variables_from_trace(trace, dbg)
+    return get_variables_from_trace(trace)
