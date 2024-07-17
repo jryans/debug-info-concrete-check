@@ -1,7 +1,6 @@
 # Extracted from https://github.com/cristianassaiante/incomplete-debuginfo
 
 import os
-import sys
 import random
 import tempfile
 import platform
@@ -11,35 +10,42 @@ from run import *
 from log import *
 
 # Arguments: binary
-DWARF = "/Users/jryans/Projects/LLVM/llvm/builds/release-clang-lldb/bin/llvm-dwarfdump --debug-line %s"
+DWARF = "/Users/jryans/Projects/LLVM/llvm/builds/release-clang-lldb/bin/llvm-dwarfdump --debug-line {0}"
 
 # Arguments: script_path, binary, program_args
-LLDB = "lldb -s %s -- %s %s"
+LLDB = "lldb -s {0} -- {1} {2}"
 
-# Arguments: bp_scripts
-LLDB_SCRIPT_TEMPLATE = """%s
+# Arguments: dwarf_path, tracer_dir, function_scripts
+LLDB_SCRIPT_TEMPLATE = """
+target symbols add {0}
 
-run
+command script import {1}/lldb.py
+
+{2}
+
+process launch -o ./concrete-trace/stdout -e ./concrete-trace/stderr
 quit
 """
 
-# Arguments: line
-LLDB_BP_TEMPLATE = """tbreak %d
-break command add %d
-    frame info
-    frame var
-    continue
-DONE
+# Arguments: function
+LLDB_FUNCTION_TEMPLATE = """
+break set -n {0}
+break command add -F lldb.on_breakpoint
 """
 
 
-def get_lines(binary_path):
-    lines = set()
-    dwarf_path = binary_path
+def get_dwarf_path(binary):
+    dwarf_path = binary
     if platform.system() == "Darwin":
         # TODO: Ask Spotlight to find debug info by UUID...?
-        dwarf_path = f"{binary_path}.dwarf"
-    output = run_cmd(DWARF % dwarf_path, get_output=True)
+        dwarf_path = f"{binary}.dwarf"
+    return dwarf_path
+
+
+def get_lines(binary):
+    lines = set()
+    dwarf_path = get_dwarf_path(binary)
+    output = run_cmd(DWARF.format(dwarf_path), get_output=True)
     for line in output.split("\n"):
         if len(line.strip().split()) < 2:
             continue
@@ -63,10 +69,12 @@ def run_dbg(binary, program_args, dbg_script):
         with open(script_path, "w") as f:
             f.write(dbg_script)
 
-        # print(f"Binary: {binary}")
-        # print(f"Script: {script_path}")
+        # print(f"## Script\n\n{dbg_script}")
 
-        cmd = cmd_template % (script_path, binary, program_args)
+        # print(f"Binary: {binary}")
+        # print(f"Script path: {script_path}")
+
+        cmd = cmd_template.format(script_path, binary, " ".join(program_args))
 
         # print(f"Command: {cmd}")
 
@@ -134,14 +142,19 @@ def get_variables_from_trace(trace):
     return output
 
 
-def get_traced_variables(binary, program_args):
-    lines = get_lines(binary)
+def trace(binary, program_args, functions):
+    # TODO: Support all executed functions
+    assert len(functions) >= 1
 
     script_template = LLDB_SCRIPT_TEMPLATE
-    bps = [LLDB_BP_TEMPLATE % (line, i + 1) for i, line in enumerate(lines)]
 
-    dbg_script = script_template % "".join(bps)
+    dwarf_path = get_dwarf_path(binary)
+    tracer_dir = os.path.dirname(__file__)
 
-    trace = run_dbg(binary, program_args, dbg_script)
+    function_scripts = [LLDB_FUNCTION_TEMPLATE.format(f) for f in functions]
 
-    return get_variables_from_trace(trace)
+    dbg_script = script_template.format(
+        dwarf_path, tracer_dir, "".join(function_scripts)
+    )
+
+    return run_dbg(binary, program_args, dbg_script)

@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 
+import os
 import argparse
 
 import tracer
 
 
 def main(args):
-    before_lines = tracer.get_lines(args.before_binary)
+    os.makedirs("concrete-trace", exist_ok=True)
 
-    print(before_lines)
+    before_trace = tracer.trace(args.before_binary, args.args, args.include_function)
+
+    print(before_trace)
 
 
 if __name__ == "__main__":
