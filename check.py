@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
+# Requires Python installation with access to LLDB modules
 
 import os
 import argparse

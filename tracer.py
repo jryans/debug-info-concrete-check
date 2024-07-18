@@ -1,37 +1,6 @@
-# Extracted from https://github.com/cristianassaiante/incomplete-debuginfo
-
-import os
-import random
-import tempfile
 import platform
-import os.path
 
-from run import *
-from log import *
-
-# Arguments: binary
-DWARF = "/Users/jryans/Projects/LLVM/llvm/builds/release-clang-lldb/bin/llvm-dwarfdump --debug-line {0}"
-
-# Arguments: script_path, binary, program_args
-LLDB = "lldb -s {0} -- {1} {2}"
-
-# Arguments: dwarf_path, tracer_dir, function_scripts
-LLDB_SCRIPT_TEMPLATE = """
-target symbols add {0}
-
-command script import {1}/lldb.py
-
-{2}
-
-process launch -o ./concrete-trace/stdout -e ./concrete-trace/stderr
-quit
-"""
-
-# Arguments: function
-LLDB_FUNCTION_TEMPLATE = """
-break set -n {0}
-break command add -F lldb.on_breakpoint
-"""
+import lldb_collector
 
 
 def get_dwarf_path(binary):
@@ -42,47 +11,7 @@ def get_dwarf_path(binary):
     return dwarf_path
 
 
-def get_lines(binary):
-    lines = set()
-    dwarf_path = get_dwarf_path(binary)
-    output = run_cmd(DWARF.format(dwarf_path), get_output=True)
-    for line in output.split("\n"):
-        if len(line.strip().split()) < 2:
-            continue
-        if "is_stmt" not in line.strip().split()[-1].strip():
-            continue
-        line = line.strip().split()[1].strip()
-        if line.isnumeric():
-            lines.add(int(line))
-    if 0 in lines:
-        lines.remove(0)
-    return list(lines)
-
-
-def run_dbg(binary, program_args, dbg_script):
-    output = ""
-    cmd_template = LLDB
-
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        script_file = str(random.randint(0, 2**32)) + ".dbg"
-        script_path = os.path.join(tmp_dir, script_file)
-        with open(script_path, "w") as f:
-            f.write(dbg_script)
-
-        # print(f"## Script\n\n{dbg_script}")
-
-        # print(f"Binary: {binary}")
-        # print(f"Script path: {script_path}")
-
-        cmd = cmd_template.format(script_path, binary, " ".join(program_args))
-
-        # print(f"Command: {cmd}")
-
-        output = run_cmd(cmd, get_output=True)
-
-    return output
-
-
+# Extracted from https://github.com/cristianassaiante/incomplete-debuginfo
 def get_variables_from_trace(trace):
     output = {}
 
@@ -146,15 +75,6 @@ def trace(binary, program_args, functions):
     # TODO: Support all executed functions
     assert len(functions) >= 1
 
-    script_template = LLDB_SCRIPT_TEMPLATE
-
     dwarf_path = get_dwarf_path(binary)
-    tracer_dir = os.path.dirname(__file__)
 
-    function_scripts = [LLDB_FUNCTION_TEMPLATE.format(f) for f in functions]
-
-    dbg_script = script_template.format(
-        dwarf_path, tracer_dir, "".join(function_scripts)
-    )
-
-    return run_dbg(binary, program_args, dbg_script)
+    return lldb_collector.trace(binary, dwarf_path, program_args, functions)
