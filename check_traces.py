@@ -4,13 +4,13 @@
 import os
 import argparse
 
-import tracer
+import collect_trace
 
 
 def main(args):
     os.makedirs("concrete-trace", exist_ok=True)
 
-    before_trace = tracer.trace(args.before_binary, args.args, args.include_function)
+    before_trace = collect_trace.trace(args.before_binary, args.args, args.include_function)
 
     print(before_trace)
 
