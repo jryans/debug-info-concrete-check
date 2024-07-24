@@ -89,6 +89,9 @@ def trace(binary, dwarf_path, program_args, functions, get_out_path, print_func)
 
     debugger = lldb.SBDebugger.Create()
 
+    # Disable color output to avoid terminal escape codes in trace files
+    debugger.SetUseColor(False)
+
     # Create target and add symbols
     target = debugger.CreateTarget(binary)
     add_symbols(debugger, dwarf_path)
