@@ -1,3 +1,8 @@
+#!/usr/bin/python3
+# Requires Python installation with access to LLDB modules
+
+import argparse
+import os
 import platform
 
 import lldb_collector
@@ -75,6 +80,39 @@ def trace(binary, program_args, functions):
     # TODO: Support all executed functions
     assert len(functions) >= 1
 
+    out_dir = "concrete-trace"
+    os.makedirs(out_dir, exist_ok=True)
+
+    def get_out_path(file):
+        return os.path.join(out_dir, file)
+
     dwarf_path = get_dwarf_path(binary)
 
-    return lldb_collector.trace(binary, dwarf_path, program_args, functions)
+    with open(get_out_path("trace"), "w") as trace_file:
+
+        def trace_print(message):
+            print(message, file=trace_file)
+
+        lldb_collector.trace(
+            binary, dwarf_path, program_args, functions, get_out_path, trace_print
+        )
+
+
+def main(args):
+    trace(args.binary, args.args, args.include_function)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(prog="collect-debug-info-trace")
+
+    parser.add_argument("binary", help="Program binary")
+    parser.add_argument("args", nargs="*", help="Program arguments")
+
+    parser.add_argument(
+        "--include-function",
+        action="append",
+        help="Include only specific named function "
+        "(exact match, can be specified multiple times)",
+    )
+
+    main(parser.parse_args())

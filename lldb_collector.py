@@ -22,6 +22,10 @@ except ImportError:
         print("Error: Couldn't locate the `lldb` module")
         sys.exit(1)
 
+# Globals
+
+trace_print = None
+
 # Hybrid functions
 # These functions can be used both inside and outside LLDB's Python environment
 
@@ -37,9 +41,9 @@ def run_command_and_print_output(debugger, command):
     result = lldb.SBCommandReturnObject()
     interpreter.HandleCommand(command, result)
     if result.Succeeded():
-        print(result.GetOutput())
+        trace_print(result.GetOutput())
     else:
-        print(f"`{command}` failed: {result.GetError()}")
+        trace_print(f"`{command}` failed: {result.GetError()}")
 
 
 def print_frame_details(frame):
@@ -79,7 +83,10 @@ def add_symbols(debugger, dwarf_path):
 
 
 # Launches LLDB for tracing from an external Python environment
-def trace(binary, dwarf_path, program_args, functions):
+def trace(binary, dwarf_path, program_args, functions, get_out_path, print_func):
+    global trace_print
+    trace_print = print_func
+
     debugger = lldb.SBDebugger.Create()
 
     # Create target and add symbols
@@ -150,8 +157,8 @@ def trace(binary, dwarf_path, program_args, functions):
         program_args,
         None,  # envp
         None,  # stdin_path
-        "./concrete-trace/stdout",
-        "./concrete-trace/stderr",
+        get_out_path("stdout"),
+        get_out_path("stderr"),
         None,  # working_directory
         0,  # launch_flags
         False,  # stop_at_entry
