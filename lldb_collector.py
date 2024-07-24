@@ -163,7 +163,7 @@ def trace(binary, dwarf_path, program_args, functions, get_out_path, print_func)
         get_out_path("stdout"),
         get_out_path("stderr"),
         None,  # working_directory
-        0,  # launch_flags
+        lldb.eLaunchFlagDisableASLR,  # launch_flags
         False,  # stop_at_entry
         error,
     )
