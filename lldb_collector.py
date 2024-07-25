@@ -26,72 +26,67 @@ except ImportError:
 trace_print = None
 
 
-def get_first_non_inlined_frame(frame):
-    while frame.is_inlined and frame.parent:
-        frame = frame.parent
-    return frame
+class Tracer:
+    def __init__(self, debugger):
+        self.debugger = debugger
 
+    def get_first_non_inlined_frame(frame):
+        while frame.is_inlined and frame.parent:
+            frame = frame.parent
+        return frame
 
-def run_command(debugger, command):
-    interpreter = debugger.GetCommandInterpreter()
-    result = lldb.SBCommandReturnObject()
-    interpreter.HandleCommand(command, result)
-    return result
+    def run_command(self, command):
+        interpreter = self.debugger.GetCommandInterpreter()
+        result = lldb.SBCommandReturnObject()
+        interpreter.HandleCommand(command, result)
+        return result
 
+    def run_command_and_print_output(self, command):
+        result = self.run_command(command)
+        if result.Succeeded():
+            print(result.GetOutput())
+        else:
+            print(f"`{command}` failed: {result.GetError()}")
 
-def run_command_and_print_output(debugger, command):
-    result = run_command(debugger, command)
-    if result.Succeeded():
-        print(result.GetOutput())
-    else:
-        print(f"`{command}` failed: {result.GetError()}")
+    def run_command_and_trace_output(self, command):
+        result = self.run_command(command)
+        if result.Succeeded():
+            trace_print(result.GetOutput())
+        else:
+            trace_print(f"`{command}` failed: {result.GetError()}")
 
+    def add_symbols(self, dwarf_path):
+        self.run_command_and_print_output(f"target symbols add {dwarf_path}")
 
-def run_command_and_trace_output(debugger, command):
-    result = run_command(debugger, command)
-    if result.Succeeded():
-        trace_print(result.GetOutput())
-    else:
-        trace_print(f"`{command}` failed: {result.GetError()}")
+    def print_current_frame_details(self):
+        self.run_command_and_trace_output("frame info")
+        self.run_command_and_trace_output("frame variable -D 0")
 
+    def on_main_function_entry(self, frame):
+        self.print_current_frame_details()
+        thread = frame.thread
+        thread.process.Continue()
 
-def add_symbols(debugger, dwarf_path):
-    run_command_and_print_output(debugger, f"target symbols add {dwarf_path}")
+    def on_included_function_entry(self, frame):
+        thread = frame.thread
+        num_frames_when_hit = thread.num_frames
+        print(f"Frames when hit: {num_frames_when_hit}")
 
+        non_inlined_frame = Tracer.get_first_non_inlined_frame(frame)
+        print(f"First non-inlined frame index: {non_inlined_frame.idx}")
 
-def print_frame_details(frame):
-    debugger = frame.thread.process.target.debugger
-    run_command_and_trace_output(debugger, "frame info")
-    run_command_and_trace_output(debugger, "frame variable -D 0")
+        num_frames_when_hit -= non_inlined_frame.idx
+        print(f"Frame when hit after inlining adjustment: {num_frames_when_hit}")
 
+        self.print_current_frame_details()
+        while thread.num_frames >= num_frames_when_hit:
+            self.debugger.SetAsync(False)
+            thread.StepOver()
+            self.debugger.SetAsync(True)
+            self.print_current_frame_details()
 
-def on_main_function_entry(frame):
-    print_frame_details(frame)
-    thread = frame.thread
-    thread.process.Continue()
-
-
-def on_included_function_entry(frame):
-    thread = frame.thread
-    num_frames_when_hit = thread.num_frames
-    print(f"Frames when hit: {num_frames_when_hit}")
-
-    non_inlined_frame = get_first_non_inlined_frame(frame)
-    print(f"First non-inlined frame index: {non_inlined_frame.idx}")
-
-    num_frames_when_hit -= non_inlined_frame.idx
-    print(f"Frame when hit after inlining adjustment: {num_frames_when_hit}")
-
-    debugger = thread.process.target.debugger
-    print_frame_details(frame)
-    while thread.num_frames >= num_frames_when_hit:
-        debugger.SetAsync(False)
-        thread.StepOver()
-        debugger.SetAsync(True)
-        print_frame_details(thread.frame[0])
-
-    print("Outside analysis window, continuing...")
-    thread.process.Continue()
+        print("Outside analysis window, continuing...")
+        thread.process.Continue()
 
 
 # Launches LLDB for tracing from an external Python environment
@@ -99,14 +94,16 @@ def trace(binary, dwarf_path, program_args, functions, get_out_path, print_func)
     global trace_print
     trace_print = print_func
 
+    # Create debugger and linked tracer
     debugger = lldb.SBDebugger.Create()
+    tracer = Tracer(debugger)
 
     # Disable color output to avoid terminal escape codes in trace files
     debugger.SetUseColor(False)
 
     # Create target and add symbols
     target = debugger.CreateTarget(binary)
-    add_symbols(debugger, dwarf_path)
+    tracer.add_symbols(dwarf_path)
 
     # Check whether all functions are being analysed or only a specific list
     all_functions = functions is None
@@ -165,9 +162,9 @@ def trace(binary, dwarf_path, program_args, functions, get_out_path, print_func)
                     continue
                 # print("Stop reason: breakpoint")
                 if all_functions:
-                    on_main_function_entry(thread.frame[0])
+                    tracer.on_main_function_entry(thread.frame[0])
                 else:
-                    on_included_function_entry(thread.frame[0])
+                    tracer.on_included_function_entry(thread.frame[0])
 
             if process.is_stopped:
                 process.Continue()
