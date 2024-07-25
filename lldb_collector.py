@@ -33,10 +33,32 @@ def trace_print(message):
     print(message, file=trace_file)
 
 
+class StoredFrame:
+    def __init__(self, frame):
+        # Store key frame properties for comparison
+        # The LLDB frame object is a live view, not fixed data
+        self.module = frame.module
+        self.pc = frame.pc
+
+        # Other properties
+        self.is_inlined = frame.is_inlined
+        self.addr = frame.addr
+
+    def __eq__(self, other):
+        return (self.module, self.pc) == (other.module, other.pc)
+
+    def __hash__(self):
+        return hash((self.module, self.pc))
+
+
 class TraceCollector:
     def __init__(self, debugger):
         self.debugger = debugger
         self.step_limit = None
+
+        # This list of frames is ordered with the oldest frame first
+        # Order is opposite of LLDB's frame order
+        self.frames_seen = []
 
     @staticmethod
     def get_first_non_inlined_frame(frame):
@@ -67,9 +89,50 @@ class TraceCollector:
     def add_symbols(self, dwarf_path):
         self.run_command_and_print_output(f"target symbols add {dwarf_path}")
 
-    def print_current_frame_details(self):
+    def trace_current_frame_info(self):
         self.run_command_and_trace_output("frame info")
+
+    def trace_current_frame_variables(self):
         self.run_command_and_trace_output("frame variable -D 0")
+
+    def trace_current_frame_details(self):
+        self.trace_current_frame_info()
+        self.trace_current_frame_variables()
+
+    def trace_frame(self, frame: StoredFrame, indent_steps=0):
+        # TODO: Handle inlined frames
+        assert not frame.is_inlined
+        for _ in range(indent_steps):
+            trace_write("  ")
+        # Roughly matching LLDB's default frame format but without args
+        # 0x000000010011dc57 git`main(argc=4, argv=0x00007ff7bfefea78) at common-main.c:31:2
+        trace_write(f"0x{frame.pc:016x} {frame.addr}")
+        trace_write("\n")
+
+    def update_frames_and_trace_tree_changes(self, thread):
+        # Walk through all thread frames, starting with the oldest frame first
+        # LLDB sorts frames with the newest frame first
+        # We store them in `frames_seen` with the oldest frame first
+        thread_num_frames = thread.num_frames
+        seen_num_frames = len(self.frames_seen)
+        for thread_fid in reversed(range(thread_num_frames)):
+            seen_fid = thread_num_frames - 1 - thread_fid
+            thread_frame = StoredFrame(thread.frame[thread_fid])
+            # trace_print(f"Thread FID: {thread_fid}, Seen FID: {seen_fid}")
+
+            if seen_fid < seen_num_frames:
+                # Existing frame index, need to compare past frame
+                seen_frame = self.frames_seen[seen_fid]
+                if seen_frame != thread_frame:
+                    self.trace_frame(thread_frame, seen_fid)
+                    self.frames_seen[seen_fid] = thread_frame
+            else:
+                # New frame index with no past frame to compare to
+                self.trace_frame(thread_frame, seen_fid)
+                self.frames_seen.append(thread_frame)
+
+        # Remove any extra frames from seen list
+        del self.frames_seen[thread_num_frames:]
 
     def on_main_function_entry(self, frame):
         thread = frame.thread
@@ -81,13 +144,15 @@ class TraceCollector:
         print(f"Tracing {self.step_limit} steps")
 
         steps = 0
-        self.print_current_frame_details()
+        self.update_frames_and_trace_tree_changes(thread)
+        self.trace_current_frame_variables()
         steps += 1
         while steps < self.step_limit:
             self.debugger.SetAsync(False)
             thread.StepInto()
             self.debugger.SetAsync(True)
-            self.print_current_frame_details()
+            self.update_frames_and_trace_tree_changes(thread)
+            self.trace_current_frame_variables()
             steps += 1
 
         print(f"Reached end of tracing steps, continuing...")
@@ -104,12 +169,12 @@ class TraceCollector:
         num_frames_when_hit -= non_inlined_frame.idx
         print(f"Frame when hit after inlining adjustment: {num_frames_when_hit}")
 
-        self.print_current_frame_details()
+        self.trace_current_frame_details()
         while thread.num_frames >= num_frames_when_hit:
             self.debugger.SetAsync(False)
             thread.StepOver()
             self.debugger.SetAsync(True)
-            self.print_current_frame_details()
+            self.trace_current_frame_details()
 
         print("Outside analysis window, continuing...")
         thread.process.Continue()
