@@ -33,7 +33,7 @@ def trace_print(message):
     print(message, file=trace_file)
 
 
-class Tracer:
+class TraceCollector:
     def __init__(self, debugger):
         self.debugger = debugger
         self.step_limit = None
@@ -98,7 +98,7 @@ class Tracer:
         num_frames_when_hit = thread.num_frames
         print(f"Frames when hit: {num_frames_when_hit}")
 
-        non_inlined_frame = Tracer.get_first_non_inlined_frame(frame)
+        non_inlined_frame = TraceCollector.get_first_non_inlined_frame(frame)
         print(f"First non-inlined frame index: {non_inlined_frame.idx}")
 
         num_frames_when_hit -= non_inlined_frame.idx
@@ -120,16 +120,16 @@ def trace(binary, dwarf_path, program_args, functions, steps, get_out_path, trac
     global trace_file
     trace_file = trace
 
-    # Create debugger and linked tracer
+    # Create debugger and linked trace collector
     debugger = lldb.SBDebugger.Create()
-    tracer = Tracer(debugger)
+    collector = TraceCollector(debugger)
 
     # Disable color output to avoid terminal escape codes in trace files
     debugger.SetUseColor(False)
 
     # Create target and add symbols
     target = debugger.CreateTarget(binary)
-    tracer.add_symbols(dwarf_path)
+    collector.add_symbols(dwarf_path)
 
     # Check whether all functions are being analysed or only a specific list
     all_functions = functions is None
@@ -148,7 +148,7 @@ def trace(binary, dwarf_path, program_args, functions, steps, get_out_path, trac
         print(f"Locations: {bp.num_locations}")
 
     # Apply step limit if any
-    tracer.step_limit = steps
+    collector.step_limit = steps
 
     # Listen for debugger events from separate thread
     process = None
@@ -191,9 +191,9 @@ def trace(binary, dwarf_path, program_args, functions, steps, get_out_path, trac
                     continue
                 # print("Stop reason: breakpoint")
                 if all_functions:
-                    tracer.on_main_function_entry(thread.frame[0])
+                    collector.on_main_function_entry(thread.frame[0])
                 else:
-                    tracer.on_included_function_entry(thread.frame[0])
+                    collector.on_included_function_entry(thread.frame[0])
 
             if process.is_stopped:
                 process.Continue()
