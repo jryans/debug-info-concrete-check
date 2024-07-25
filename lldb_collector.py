@@ -172,6 +172,12 @@ def trace(binary, dwarf_path, program_args, functions, get_out_path, print_func)
     event_listener_thread = threading.Thread(target=event_listener)
     event_listener_thread.start()
 
+    # Clear stdio files manually, as process launch below does not do so
+    stdout_path = get_out_path("stdout")
+    stderr_path = get_out_path("stderr")
+    os.remove(stdout_path)
+    os.remove(stderr_path)
+
     # Create target and process
     error = lldb.SBError()
     process = target.Launch(
@@ -179,8 +185,8 @@ def trace(binary, dwarf_path, program_args, functions, get_out_path, print_func)
         program_args,
         None,  # envp
         None,  # stdin_path
-        get_out_path("stdout"),
-        get_out_path("stderr"),
+        stdout_path,
+        stderr_path,
         None,  # working_directory
         lldb.eLaunchFlagDisableASLR,  # launch_flags
         False,  # stop_at_entry
