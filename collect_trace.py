@@ -76,7 +76,7 @@ def get_variables_from_trace(trace):
     return output
 
 
-def trace(binary, program_args, functions):
+def trace(binary, program_args, functions, steps):
     out_dir = "concrete-trace"
     os.makedirs(out_dir, exist_ok=True)
 
@@ -91,12 +91,18 @@ def trace(binary, program_args, functions):
             print(message, file=trace_file)
 
         lldb_collector.trace(
-            binary, dwarf_path, program_args, functions, get_out_path, trace_print
+            binary,
+            dwarf_path,
+            program_args,
+            functions,
+            steps,
+            get_out_path,
+            trace_print,
         )
 
 
 def main(args):
-    trace(args.binary, args.args, args.include_function)
+    trace(args.binary, args.args, args.include_function, args.steps)
 
 
 if __name__ == "__main__":
@@ -110,6 +116,12 @@ if __name__ == "__main__":
         action="append",
         help="Include only specific named function "
         "(exact match, can be specified multiple times)",
+    )
+
+    parser.add_argument(
+        "--steps",
+        type=int,
+        help="Limit tracing to specific number of steps through the program",
     )
 
     main(parser.parse_args())

@@ -29,6 +29,7 @@ trace_print = None
 class Tracer:
     def __init__(self, debugger):
         self.debugger = debugger
+        self.step_limit = None
 
     @staticmethod
     def get_first_non_inlined_frame(frame):
@@ -64,8 +65,25 @@ class Tracer:
         self.run_command_and_trace_output("frame variable -D 0")
 
     def on_main_function_entry(self, frame):
-        self.print_current_frame_details()
         thread = frame.thread
+        print("Main function entered")
+
+        # TODO: Remove this default
+        if self.step_limit is None:
+            self.step_limit = 20
+        print(f"Tracing {self.step_limit} steps")
+
+        steps = 0
+        self.print_current_frame_details()
+        steps += 1
+        while steps < self.step_limit:
+            self.debugger.SetAsync(False)
+            thread.StepInto()
+            self.debugger.SetAsync(True)
+            self.print_current_frame_details()
+            steps += 1
+
+        print(f"Reached end of tracing steps, continuing...")
         thread.process.Continue()
 
     def on_included_function_entry(self, frame):
@@ -91,7 +109,7 @@ class Tracer:
 
 
 # Launches LLDB for tracing from an external Python environment
-def trace(binary, dwarf_path, program_args, functions, get_out_path, print_func):
+def trace(binary, dwarf_path, program_args, functions, steps, get_out_path, print_func):
     global trace_print
     trace_print = print_func
 
@@ -121,6 +139,9 @@ def trace(binary, dwarf_path, program_args, functions, get_out_path, print_func)
         # Each function name might result in multiple locations
         assert bp.num_locations >= 1
         print(f"Locations: {bp.num_locations}")
+
+    # Apply step limit if any
+    tracer.step_limit = steps
 
     # Listen for debugger events from separate thread
     process = None
