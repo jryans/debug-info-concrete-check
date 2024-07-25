@@ -30,6 +30,7 @@ class Tracer:
     def __init__(self, debugger):
         self.debugger = debugger
 
+    @staticmethod
     def get_first_non_inlined_frame(frame):
         while frame.is_inlined and frame.parent:
             frame = frame.parent
