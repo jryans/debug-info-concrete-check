@@ -22,8 +22,15 @@ except ImportError:
         print("Error: Couldn't locate the `lldb` module")
         sys.exit(1)
 
-# Global print to trace function
-trace_print = None
+trace_file = sys.stdout
+
+
+def trace_write(message):
+    trace_file.write(message)
+
+
+def trace_print(message):
+    print(message, file=trace_file)
 
 
 class Tracer:
@@ -109,9 +116,9 @@ class Tracer:
 
 
 # Launches LLDB for tracing from an external Python environment
-def trace(binary, dwarf_path, program_args, functions, steps, get_out_path, print_func):
-    global trace_print
-    trace_print = print_func
+def trace(binary, dwarf_path, program_args, functions, steps, get_out_path, trace):
+    global trace_file
+    trace_file = trace
 
     # Create debugger and linked tracer
     debugger = lldb.SBDebugger.Create()

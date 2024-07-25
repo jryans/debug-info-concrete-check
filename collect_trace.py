@@ -86,10 +86,6 @@ def trace(binary, program_args, functions, steps):
     dwarf_path = get_dwarf_path(binary)
 
     with open(get_out_path("trace"), "w") as trace_file:
-
-        def trace_print(message):
-            print(message, file=trace_file)
-
         lldb_collector.trace(
             binary,
             dwarf_path,
@@ -97,7 +93,7 @@ def trace(binary, program_args, functions, steps):
             functions,
             steps,
             get_out_path,
-            trace_print,
+            trace_file,
         )
 
 
