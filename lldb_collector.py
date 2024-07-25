@@ -36,10 +36,15 @@ def get_first_non_inlined_frame(frame):
     return frame
 
 
-def run_command_and_print_output(debugger, command):
+def run_command(debugger, command):
     interpreter = debugger.GetCommandInterpreter()
     result = lldb.SBCommandReturnObject()
     interpreter.HandleCommand(command, result)
+    return result
+
+
+def run_command_and_print_output(debugger, command):
+    result = run_command(debugger, command)
     if result.Succeeded():
         trace_print(result.GetOutput())
     else:
@@ -79,7 +84,7 @@ def on_breakpoint(frame, bp_loc=None, internal_dict=None):
 
 
 def add_symbols(debugger, dwarf_path):
-    run_command_and_print_output(debugger, f"target symbols add {dwarf_path}")
+    run_command(debugger, f"target symbols add {dwarf_path}")
 
 
 # Launches LLDB for tracing from an external Python environment
