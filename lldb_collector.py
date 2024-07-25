@@ -50,6 +50,9 @@ class StoredFrame:
     def __hash__(self):
         return hash((self.module, self.pc))
 
+    def __repr__(self):
+        return repr(self.__dict__)
+
 
 class TraceCollector:
     def __init__(self, debugger):
@@ -110,6 +113,11 @@ class TraceCollector:
         trace_write("\n")
 
     def update_frames_and_trace_tree_changes(self, thread):
+        # Track different types of modifications
+        added = False
+        changed = False
+        removed = False
+
         # Walk through all thread frames, starting with the oldest frame first
         # LLDB sorts frames with the newest frame first
         # We store them in `frames_seen` with the oldest frame first
@@ -123,16 +131,24 @@ class TraceCollector:
             if seen_fid < seen_num_frames:
                 # Existing frame index, need to compare past frame
                 seen_frame = self.frames_seen[seen_fid]
+                # trace_print(f"Seen: {seen_frame}")
+                # trace_print(f"Thre: {thread_frame}")
                 if seen_frame != thread_frame:
                     self.trace_frame(thread_frame, seen_fid)
                     self.frames_seen[seen_fid] = thread_frame
+                    changed = True
             else:
                 # New frame index with no past frame to compare to
                 self.trace_frame(thread_frame, seen_fid)
                 self.frames_seen.append(thread_frame)
+                added = True
 
         # Remove any extra frames from seen list
-        del self.frames_seen[thread_num_frames:]
+        if seen_num_frames > thread_num_frames:
+            del self.frames_seen[thread_num_frames:]
+            removed = True
+
+        return {"added": added, "changed": changed, "removed": removed}
 
     def on_main_function_entry(self, frame):
         thread = frame.thread
@@ -144,15 +160,19 @@ class TraceCollector:
         print(f"Tracing {self.step_limit} steps")
 
         steps = 0
-        self.update_frames_and_trace_tree_changes(thread)
-        self.trace_current_frame_variables()
+        tree_mods = self.update_frames_and_trace_tree_changes(thread)
+        # self.trace_current_frame_info()
+        if tree_mods["added"] or tree_mods["changed"]:
+            self.trace_current_frame_variables()
         steps += 1
         while steps < self.step_limit:
             self.debugger.SetAsync(False)
             thread.StepInto()
             self.debugger.SetAsync(True)
-            self.update_frames_and_trace_tree_changes(thread)
-            self.trace_current_frame_variables()
+            tree_mods = self.update_frames_and_trace_tree_changes(thread)
+            # self.trace_current_frame_info()
+            if tree_mods["added"] or tree_mods["changed"]:
+                self.trace_current_frame_variables()
             steps += 1
 
         print(f"Reached end of tracing steps, continuing...")
