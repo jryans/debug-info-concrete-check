@@ -57,7 +57,13 @@ def print_frame_details(frame):
     run_command_and_print_output(debugger, "frame variable -D 0")
 
 
-def on_breakpoint(frame, bp_loc=None, internal_dict=None):
+def on_main_function_entry(frame, bp_loc=None, internal_dict=None):
+    print_frame_details(frame)
+    thread = frame.thread
+    thread.process.Continue()
+
+
+def on_included_function_entry(frame, bp_loc=None, internal_dict=None):
     thread = frame.thread
     num_frames_when_hit = thread.num_frames
     print(f"Frames when hit: {num_frames_when_hit}")
@@ -100,6 +106,13 @@ def trace(binary, dwarf_path, program_args, functions, get_out_path, print_func)
     # Create target and add symbols
     target = debugger.CreateTarget(binary)
     add_symbols(debugger, dwarf_path)
+
+    # Check whether all functions are being analysed or only a specific list
+    all_functions = functions is None
+
+    # When analysing all functions, start from program's main
+    if all_functions:
+        functions = ["main"]
 
     # Break on entry to each analysed function
     for function in functions:
@@ -150,7 +163,10 @@ def trace(binary, dwarf_path, program_args, functions, get_out_path, print_func)
                 if stop_reason != lldb.eStopReasonBreakpoint:
                     continue
                 # print("Stop reason: breakpoint")
-                on_breakpoint(thread.frame[0])
+                if all_functions:
+                    on_main_function_entry(thread.frame[0])
+                else:
+                    on_included_function_entry(thread.frame[0])
 
             if process.is_stopped:
                 process.Continue()

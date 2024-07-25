@@ -77,9 +77,6 @@ def get_variables_from_trace(trace):
 
 
 def trace(binary, program_args, functions):
-    # TODO: Support all executed functions
-    assert len(functions) >= 1
-
     out_dir = "concrete-trace"
     os.makedirs(out_dir, exist_ok=True)
 
