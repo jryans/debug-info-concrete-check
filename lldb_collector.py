@@ -103,13 +103,14 @@ class TraceCollector:
         self.trace_current_frame_variables()
 
     def trace_frame(self, frame: StoredFrame, indent_steps=0):
-        # TODO: Handle inlined frames
-        assert not frame.is_inlined
         for _ in range(indent_steps):
             trace_write("  ")
         # Roughly matching LLDB's default frame format but without args
         # 0x000000010011dc57 git`main(argc=4, argv=0x00007ff7bfefea78) at common-main.c:31:2
-        trace_write(f"0x{frame.pc:016x} {frame.addr}")
+        # `frame.addr` covers the bulk of this, but includes extra lines we
+        # don't need when inlining is involved.
+        frame_addr_first_line = repr(frame.addr).splitlines()[0]
+        trace_write(f"0x{frame.pc:016x} {frame_addr_first_line}")
         trace_write("\n")
 
     def update_frames_and_trace_tree_changes(self, thread):
@@ -127,6 +128,7 @@ class TraceCollector:
             seen_fid = thread_num_frames - 1 - thread_fid
             thread_frame = StoredFrame(thread.frame[thread_fid])
             # trace_print(f"Thread FID: {thread_fid}, Seen FID: {seen_fid}")
+            # trace_print(thread.frame[thread_fid])
 
             if seen_fid < seen_num_frames:
                 # Existing frame index, need to compare past frame
