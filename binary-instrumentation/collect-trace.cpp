@@ -1,19 +1,21 @@
-#include <fstream>
-#include <iomanip>
-#include <iostream>
+#include <memory>
+#include <system_error>
+
+#include "llvm/Support/Format.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include "QBDIPreload.h"
 
-static std::fstream trace;
+static std::unique_ptr<llvm::raw_fd_ostream> trace;
 
 static QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm,
                                     QBDI::GPRState *gprState,
                                     QBDI::FPRState *fprState, void *data) {
   const QBDI::InstAnalysis *instAnalysis = vm->getInstAnalysis();
 
-  trace << std::setbase(16) << instAnalysis->address << ": "
-        << instAnalysis->disassembly << std::endl
-        << std::setbase(10);
+  // 16 hex digits for 64-bit address plus 2 character prefix
+  *trace << llvm::format_hex(instAnalysis->address, 18) << ": "
+         << instAnalysis->disassembly << "\n";
 
   return QBDI::CONTINUE;
 }
@@ -34,8 +36,9 @@ int qbdipreload_on_main(int argc, char **argv) {
 
 int qbdipreload_on_run(QBDI::VMInstanceRef vm, QBDI::rword start,
                        QBDI::rword stop) {
-  trace.open("concrete-trace/trace", std::ios::out);
-  if (!trace.is_open())
+  std::error_code error;
+  trace = std::make_unique<llvm::raw_fd_ostream>("concrete-trace/trace", error);
+  if (error)
     return QBDIPRELOAD_ERR_STARTUP_FAILED;
 
   vm->addCodeCB(QBDI::PREINST, onInstruction, nullptr);
