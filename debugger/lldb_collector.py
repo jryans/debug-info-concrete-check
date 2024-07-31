@@ -285,8 +285,8 @@ def trace(binary, dwarf_path, program_args, functions, steps, get_out_path, trac
             if process.is_stopped:
                 process.Continue()
 
-    event_listener_thread = threading.Thread(target=event_listener)
-    event_listener_thread.start()
+    # event_listener_thread = threading.Thread(target=event_listener)
+    # event_listener_thread.start()
 
     # Clear stdio files manually, as process launch below does not do so
     stdout_path = get_out_path("stdout")
@@ -311,7 +311,8 @@ def trace(binary, dwarf_path, program_args, functions, steps, get_out_path, trac
     assert error.success
 
     # Wait for thread
-    event_listener_thread.join()
+    event_listener()
+    # event_listener_thread.join()
 
     # Tracing complete
     process.Destroy()
