@@ -96,7 +96,7 @@ class TraceCollector:
         self.run_command_and_trace_output("frame info")
 
     def trace_current_frame_variables(self):
-        self.run_command_and_trace_output("frame variable -D 0")
+        self.run_command_and_trace_output("frame variable -D 0 -d no-dynamic-values")
 
     def trace_current_frame_details(self):
         self.trace_current_frame_info()
