@@ -10,7 +10,7 @@ add_library(collect-trace-preload SHARED
 )
 
 target_link_libraries(collect-trace-preload PRIVATE
-  QBDI::QBDI_static
+  QBDI::QBDI
   QBDIPreload::QBDIPreload
 )
 
@@ -20,6 +20,9 @@ set_target_properties(collect-trace-preload PROPERTIES
 )
 
 # LLVM
+
+find_package(ZLIB REQUIRED)
+find_package(zstd REQUIRED)
 
 include(${CMAKE_SOURCE_DIR}/cmake/find_llvm.cmake)
 
@@ -50,5 +53,7 @@ set(LLVM_COMPONENTS
 )
 get_llvm_libs(LLVM_LIBS ${LLVM_COMPONENTS})
 target_link_libraries(collect-trace-preload PRIVATE
+  ${ZLIB_LIBRARY}
+  zstd::libzstd_shared
   ${LLVM_LIBS}
 )
