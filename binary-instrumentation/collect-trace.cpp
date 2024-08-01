@@ -6,7 +6,9 @@
 
 #include "QBDIPreload.h"
 
-static std::unique_ptr<llvm::raw_fd_ostream> trace;
+using namespace llvm;
+
+static std::unique_ptr<raw_fd_ostream> trace;
 
 static QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm,
                                     QBDI::GPRState *gprState,
@@ -14,7 +16,7 @@ static QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm,
   const QBDI::InstAnalysis *instAnalysis = vm->getInstAnalysis();
 
   // 16 hex digits for 64-bit address plus 2 character prefix
-  *trace << llvm::format_hex(instAnalysis->address, 18) << ": "
+  *trace << format_hex(instAnalysis->address, 18) << ": "
          << instAnalysis->disassembly << "\n";
 
   return QBDI::CONTINUE;
@@ -37,7 +39,7 @@ int qbdipreload_on_main(int argc, char **argv) {
 int qbdipreload_on_run(QBDI::VMInstanceRef vm, QBDI::rword start,
                        QBDI::rword stop) {
   std::error_code error;
-  trace = std::make_unique<llvm::raw_fd_ostream>("concrete-trace/trace", error);
+  trace = std::make_unique<raw_fd_ostream>("concrete-trace/trace", error);
   if (error)
     return QBDIPRELOAD_ERR_STARTUP_FAILED;
 
