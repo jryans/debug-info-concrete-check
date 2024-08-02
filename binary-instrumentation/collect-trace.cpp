@@ -30,11 +30,13 @@ static std::unique_ptr<object::Binary> dwarfBinary;
 static std::unique_ptr<DWARFContext> dwarfCtx;
 
 static size_t stackDepth = 0;
+static bool stackDepthChanged = true;
 static bool lastInstWasCall = false;
 
 static QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm,
                                     QBDI::GPRState *gprState,
                                     QBDI::FPRState *fprState, void *data) {
+  // TODO: Defer analysis when stack depth unchanged
   QBDI::AnalysisType analysisType = QBDI::ANALYSIS_INSTRUCTION;
   if (verbose)
     analysisType |= QBDI::ANALYSIS_DISASSEMBLY;
@@ -50,43 +52,54 @@ static QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm,
   // instruction without info, revert the stack depth.
   if (lastInstWasCall) {
     lastInstWasCall = false;
-    if (!lineInfo)
+    if (!lineInfo) {
       --stackDepth;
+      stackDepthChanged = false;
+    }
   }
 
-  // Print indentation to represent current stack depth
-  for (size_t i = 0; i < stackDepth; ++i)
-    *trace << "  ";
+  // By default, only log to trace when stack depth changes
+  if (stackDepthChanged || verbose) {
+    // Reset change tracker
+    stackDepthChanged = false;
 
-  // 16 hex digits for 64-bit address plus 2 character prefix
-  if (verbose)
-    *trace << format_hex(address, 18) << " ";
+    // Print indentation to represent current stack depth
+    for (size_t i = 0; i < stackDepth; ++i)
+      *trace << "  ";
 
-  // Print function name and line info
-  if (lineInfo) {
-    const auto functionOffset = address - *lineInfo.StartAddress;
-    *trace << lineInfo.FunctionName;
+    // 16 hex digits for 64-bit address plus 2 character prefix
     if (verbose)
-      *trace << " + " << format_hex(functionOffset, 6);
-    *trace << " at " << lineInfo.FileName << ":" << lineInfo.Line << ":"
-           << lineInfo.Column << "\n";
-  } else {
-    *trace << "🔔 No info for this address\n";
-  }
+      *trace << format_hex(address, 18) << " ";
 
-  // Include disassembly for trace debugging
-  if (verbose)
-    *trace << instAnalysis->disassembly << "\n";
+    // Print function name and line info
+    if (lineInfo) {
+      const auto functionOffset = address - *lineInfo.StartAddress;
+      *trace << lineInfo.FunctionName;
+      if (verbose)
+        *trace << " + " << format_hex(functionOffset, 6);
+      *trace << " at " << lineInfo.FileName << ":" << lineInfo.Line << ":"
+             << lineInfo.Column << "\n";
+    } else {
+      *trace << "🔔 No info for this address\n";
+    }
+
+    // Include disassembly for trace debugging
+    if (verbose)
+      *trace << instAnalysis->disassembly << "\n";
+  }
 
   // Update stack depth for next instruction after calls and returns
   if (instAnalysis->isCall) {
     ++stackDepth;
+    stackDepthChanged = true;
     lastInstWasCall = true;
   } else if (instAnalysis->isReturn) {
-    if (stackDepth)
+    if (stackDepth) {
       --stackDepth;
-    else
+      stackDepthChanged = true;
+    } else {
       *trace << "🔔 Ignoring return, stack depth would have wrapped around\n";
+    }
   }
 
   return QBDI::CONTINUE;
