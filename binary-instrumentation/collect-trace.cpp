@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <memory>
 #include <system_error>
 #include <utility>
@@ -25,19 +26,36 @@ static std::unique_ptr<MemoryBuffer> dwarfBuffer;
 static std::unique_ptr<object::Binary> dwarfBinary;
 static std::unique_ptr<DWARFContext> dwarfCtx;
 
+static size_t stackDepth = 0;
+static bool lastInstWasCall = false;
+
 static QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm,
                                     QBDI::GPRState *gprState,
                                     QBDI::FPRState *fprState, void *data) {
   const QBDI::InstAnalysis *instAnalysis = vm->getInstAnalysis();
   const auto &address = instAnalysis->address;
 
-  // 16 hex digits for 64-bit address plus 2 character prefix
-  *trace << format_hex(address, 18) << " ";
-
   // Look for function name and line info related to this address
   const auto lineInfo = dwarfCtx->getLineInfoForAddress(
       {address}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
                   DILineInfoSpecifier::FunctionNameKind::ShortName});
+
+  // If last instrumented instruction was a call, and then we encountered an
+  // instruction without info, revert the stack depth.
+  if (lastInstWasCall) {
+    lastInstWasCall = false;
+    if (!lineInfo)
+      --stackDepth;
+  }
+
+  // Print indentation to represent current stack depth
+  for (size_t i = 0; i < stackDepth; ++i)
+    *trace << "  ";
+
+  // 16 hex digits for 64-bit address plus 2 character prefix
+  *trace << format_hex(address, 18) << " ";
+
+  // Print function name and line info
   if (lineInfo) {
     const auto functionOffset = address - *lineInfo.StartAddress;
     *trace << lineInfo.FunctionName << " + " << format_hex(functionOffset, 6)
@@ -49,6 +67,17 @@ static QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm,
 
   // Include disassembly for trace debugging
   *trace << instAnalysis->disassembly << "\n";
+
+  // Update stack depth for next instruction after calls and returns
+  if (instAnalysis->isCall) {
+    ++stackDepth;
+    lastInstWasCall = true;
+  } else if (instAnalysis->isReturn) {
+    if (stackDepth)
+      --stackDepth;
+    else
+      *trace << "🔔 Ignoring return, stack depth would have wrapped around\n";
+  }
 
   return QBDI::CONTINUE;
 }
