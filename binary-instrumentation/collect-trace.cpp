@@ -32,18 +32,23 @@ static QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm,
   const auto &address = instAnalysis->address;
 
   // 16 hex digits for 64-bit address plus 2 character prefix
-  *trace << format_hex(address, 18) << ": " << instAnalysis->disassembly
-         << "\n";
+  *trace << format_hex(address, 18) << " ";
 
   // Look for function name and line info related to this address
-  auto lineInfo = dwarfCtx->getLineInfoForAddress(
+  const auto lineInfo = dwarfCtx->getLineInfoForAddress(
       {address}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
                   DILineInfoSpecifier::FunctionNameKind::ShortName});
   if (lineInfo) {
-    lineInfo.dump(*trace);
+    const auto functionOffset = address - *lineInfo.StartAddress;
+    *trace << lineInfo.FunctionName << " + " << format_hex(functionOffset, 6)
+           << " at " << lineInfo.FileName << ":" << lineInfo.Line << ":"
+           << lineInfo.Column << "\n";
   } else {
     *trace << "🔔 No info for this address\n";
   }
+
+  // Include disassembly for trace debugging
+  *trace << instAnalysis->disassembly << "\n";
 
   return QBDI::CONTINUE;
 }
