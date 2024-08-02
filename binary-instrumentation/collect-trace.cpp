@@ -1,4 +1,5 @@
 #include <cstddef>
+#include <cstdlib>
 #include <memory>
 #include <system_error>
 #include <utility>
@@ -20,6 +21,8 @@
 
 using namespace llvm;
 
+static bool verbose = false;
+
 static std::unique_ptr<raw_fd_ostream> trace;
 
 static std::unique_ptr<MemoryBuffer> dwarfBuffer;
@@ -32,7 +35,10 @@ static bool lastInstWasCall = false;
 static QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm,
                                     QBDI::GPRState *gprState,
                                     QBDI::FPRState *fprState, void *data) {
-  const QBDI::InstAnalysis *instAnalysis = vm->getInstAnalysis();
+  QBDI::AnalysisType analysisType = QBDI::ANALYSIS_INSTRUCTION;
+  if (verbose)
+    analysisType |= QBDI::ANALYSIS_DISASSEMBLY;
+  const QBDI::InstAnalysis *instAnalysis = vm->getInstAnalysis(analysisType);
   const auto &address = instAnalysis->address;
 
   // Look for function name and line info related to this address
@@ -53,20 +59,24 @@ static QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm,
     *trace << "  ";
 
   // 16 hex digits for 64-bit address plus 2 character prefix
-  *trace << format_hex(address, 18) << " ";
+  if (verbose)
+    *trace << format_hex(address, 18) << " ";
 
   // Print function name and line info
   if (lineInfo) {
     const auto functionOffset = address - *lineInfo.StartAddress;
-    *trace << lineInfo.FunctionName << " + " << format_hex(functionOffset, 6)
-           << " at " << lineInfo.FileName << ":" << lineInfo.Line << ":"
+    *trace << lineInfo.FunctionName;
+    if (verbose)
+      *trace << " + " << format_hex(functionOffset, 6);
+    *trace << " at " << lineInfo.FileName << ":" << lineInfo.Line << ":"
            << lineInfo.Column << "\n";
   } else {
     *trace << "🔔 No info for this address\n";
   }
 
   // Include disassembly for trace debugging
-  *trace << instAnalysis->disassembly << "\n";
+  if (verbose)
+    *trace << instAnalysis->disassembly << "\n";
 
   // Update stack depth for next instruction after calls and returns
   if (instAnalysis->isCall) {
@@ -135,6 +145,9 @@ int qbdipreload_on_premain(void *gprCtx, void *fpuCtx) {
 }
 
 int qbdipreload_on_main(int argc, char **argv) {
+  if (std::getenv("CON_TRACE_VERBOSE"))
+    verbose = true;
+
   StringRef execPath(argv[0]);
   if (!loadDWARFDebugInfo(execPath + ".dwarf"))
     return QBDIPRELOAD_ERR_STARTUP_FAILED;
