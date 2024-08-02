@@ -164,8 +164,8 @@ class TraceCollector:
         steps = 0
         tree_mods = self.update_frames_and_trace_tree_changes(thread)
         # self.trace_current_frame_info()
-        if tree_mods["added"] or tree_mods["changed"]:
-            self.trace_current_frame_variables()
+        # if tree_mods["added"] or tree_mods["changed"]:
+        #     self.trace_current_frame_variables()
         steps += 1
         while steps < self.step_limit:
             self.debugger.SetAsync(False)
@@ -173,8 +173,8 @@ class TraceCollector:
             self.debugger.SetAsync(True)
             tree_mods = self.update_frames_and_trace_tree_changes(thread)
             # self.trace_current_frame_info()
-            if tree_mods["added"] or tree_mods["changed"]:
-                self.trace_current_frame_variables()
+            # if tree_mods["added"] or tree_mods["changed"]:
+            #     self.trace_current_frame_variables()
             steps += 1
 
         print(f"Reached end of tracing steps, continuing...")
