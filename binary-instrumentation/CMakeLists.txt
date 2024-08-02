@@ -49,6 +49,8 @@ target_include_directories(collect-trace-preload PRIVATE
 )
 
 set(LLVM_COMPONENTS
+  DebugInfoDWARF
+  Object
   Support
 )
 get_llvm_libs(LLVM_LIBS ${LLVM_COMPONENTS})
