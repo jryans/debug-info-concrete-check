@@ -39,7 +39,7 @@ static QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm,
   // TODO: Defer analysis when stack depth unchanged
   QBDI::AnalysisType analysisType = QBDI::ANALYSIS_INSTRUCTION;
   if (verbose)
-    analysisType |= QBDI::ANALYSIS_DISASSEMBLY;
+    analysisType |= (QBDI::ANALYSIS_DISASSEMBLY | QBDI::ANALYSIS_SYMBOL);
   const QBDI::InstAnalysis *instAnalysis = vm->getInstAnalysis(analysisType);
   const auto &address = instAnalysis->address;
 
@@ -67,9 +67,12 @@ static QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm,
     for (size_t i = 0; i < stackDepth; ++i)
       *trace << "  ";
 
-    // 16 hex digits for 64-bit address plus 2 character prefix
-    if (verbose)
+    // Print address and module name in verbose mode
+    if (verbose) {
+      // 16 hex digits for 64-bit address plus 2 character prefix
       *trace << format_hex(address, 18) << " ";
+      *trace << instAnalysis->moduleName << "`";
+    }
 
     // Print function name and line info
     if (lineInfo) {
