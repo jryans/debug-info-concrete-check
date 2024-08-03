@@ -52,6 +52,7 @@ void popStackFrame() {
 }
 
 void printStackDepth() {
+  // *trace << format("%4lu", stackDepth) << ": ";
   // Print indentation to represent current stack depth
   for (size_t i = 0; i < stackDepth; ++i)
     *trace << "  ";
@@ -80,8 +81,6 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
     if (lastCallReturnTarget == address) {
       lastCallReturnTarget = 0;
       popStackFrame();
-      printStackDepth();
-      *trace << "🔔 Returned from uninstrumented code\n";
     }
   }
 
