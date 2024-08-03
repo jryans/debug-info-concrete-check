@@ -23,6 +23,8 @@ using namespace llvm;
 
 namespace {
 
+void *mainFunc;
+
 bool verbose = false;
 
 std::unique_ptr<raw_fd_ostream> trace;
@@ -179,7 +181,12 @@ extern "C" {
 
 QBDIPRELOAD_INIT;
 
-int qbdipreload_on_start(void *main) { return QBDIPRELOAD_NOT_HANDLED; }
+int qbdipreload_on_start(void *main) {
+  mainFunc = main;
+  // Leave this as "not handled" so the default handler will still run,
+  // which hooks the `main` function.
+  return QBDIPRELOAD_NOT_HANDLED;
+}
 
 int qbdipreload_on_premain(void *gprCtx, void *fpuCtx) {
   return QBDIPRELOAD_NOT_HANDLED;
@@ -193,8 +200,8 @@ int qbdipreload_on_main(int argc, char **argv) {
   if (!loadDWARFDebugInfo(execPath + ".dwarf"))
     return QBDIPRELOAD_ERR_STARTUP_FAILED;
 
-  // Leave this as "not handled" so the default handler will still run, which
-  // starts up the QBDI instrumentation VM.
+  // Leave this as "not handled" so the default handler will still run,
+  // which starts up the QBDI instrumentation VM.
   return QBDIPRELOAD_NOT_HANDLED;
 }
 
@@ -206,6 +213,12 @@ int qbdipreload_on_run(QBDI::VMInstanceRef vm, QBDI::rword start,
     errs() << "Error: Unable to open trace file\n";
     return QBDIPRELOAD_ERR_STARTUP_FAILED;
   }
+
+  // Reset instrumented range to include only the main program module.
+  // This ensures we avoid the dynamic loader and libraries.
+  // The dynamic loader seems to confuse stack depth detection.
+  vm->removeAllInstrumentedRanges();
+  vm->addInstrumentedModuleFromAddr((QBDI::rword)mainFunc);
 
   vm->addCodeCB(QBDI::PREINST, onInstruction, nullptr);
   vm->run(start, stop);
