@@ -33,7 +33,27 @@ std::unique_ptr<DWARFContext> dwarfCtx;
 
 size_t stackDepth = 0;
 bool stackDepthChanged = true;
-bool lastInstWasCall = false;
+QBDI::rword lastCallReturnTarget = 0;
+
+void pushStackFrame() {
+  ++stackDepth;
+  stackDepthChanged = true;
+}
+
+void popStackFrame() {
+  if (stackDepth) {
+    --stackDepth;
+    stackDepthChanged = true;
+  } else {
+    *trace << "🔔 Ignoring return, stack depth would have wrapped around\n";
+  }
+}
+
+void printStackDepth() {
+  // Print indentation to represent current stack depth
+  for (size_t i = 0; i < stackDepth; ++i)
+    *trace << "  ";
+}
 
 QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
                              QBDI::FPRState *fprState, void *data) {
@@ -49,13 +69,17 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
       {address}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
                   DILineInfoSpecifier::FunctionNameKind::ShortName});
 
-  // If last instrumented instruction was a call, and then we encountered an
-  // instruction without info, revert the stack depth.
-  if (lastInstWasCall) {
-    lastInstWasCall = false;
-    if (!lineInfo) {
-      --stackDepth;
-      stackDepthChanged = false;
+  // If last instrumented instruction was a call, check whether this next
+  // instrumented instruction was the call's return target. If yes, it means we
+  // just returned from uninstrumented code and need to adjust stack depth.
+  // TODO: May need to track the full stack of addresses in case uninstrumented
+  // code can call back into instrumented code.
+  if (lastCallReturnTarget) {
+    if (lastCallReturnTarget == address) {
+      lastCallReturnTarget = 0;
+      popStackFrame();
+      printStackDepth();
+      *trace << "🔔 Returned from uninstrumented code\n";
     }
   }
 
@@ -64,9 +88,7 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
     // Reset change tracker
     stackDepthChanged = false;
 
-    // Print indentation to represent current stack depth
-    for (size_t i = 0; i < stackDepth; ++i)
-      *trace << "  ";
+    printStackDepth();
 
     // Print address and module name in verbose mode
     if (verbose) {
@@ -94,16 +116,16 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
 
   // Update stack depth for next instruction after calls and returns
   if (instAnalysis->isCall) {
-    ++stackDepth;
-    stackDepthChanged = true;
-    lastInstWasCall = true;
+    pushStackFrame();
+    // Track address to return to so we can compare to stack value on next
+    // instrumented instruction to check whether we followed the call. Compute
+    // this manually since this callback sees the pre-instruction register
+    // state.
+    lastCallReturnTarget = address + instAnalysis->instSize;
   } else if (instAnalysis->isReturn) {
-    if (stackDepth) {
-      --stackDepth;
-      stackDepthChanged = true;
-    } else {
-      *trace << "🔔 Ignoring return, stack depth would have wrapped around\n";
-    }
+    // Clear return target when we see an instrumented return
+    lastCallReturnTarget = 0;
+    popStackFrame();
   }
 
   return QBDI::CONTINUE;
