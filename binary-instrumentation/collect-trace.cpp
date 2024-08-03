@@ -21,21 +21,22 @@
 
 using namespace llvm;
 
-static bool verbose = false;
+namespace {
 
-static std::unique_ptr<raw_fd_ostream> trace;
+bool verbose = false;
 
-static std::unique_ptr<MemoryBuffer> dwarfBuffer;
-static std::unique_ptr<object::Binary> dwarfBinary;
-static std::unique_ptr<DWARFContext> dwarfCtx;
+std::unique_ptr<raw_fd_ostream> trace;
 
-static size_t stackDepth = 0;
-static bool stackDepthChanged = true;
-static bool lastInstWasCall = false;
+std::unique_ptr<MemoryBuffer> dwarfBuffer;
+std::unique_ptr<object::Binary> dwarfBinary;
+std::unique_ptr<DWARFContext> dwarfCtx;
 
-static QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm,
-                                    QBDI::GPRState *gprState,
-                                    QBDI::FPRState *fprState, void *data) {
+size_t stackDepth = 0;
+bool stackDepthChanged = true;
+bool lastInstWasCall = false;
+
+QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
+                             QBDI::FPRState *fprState, void *data) {
   // TODO: Defer analysis when stack depth unchanged
   QBDI::AnalysisType analysisType = QBDI::ANALYSIS_INSTRUCTION;
   if (verbose)
@@ -108,7 +109,7 @@ static QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm,
   return QBDI::CONTINUE;
 }
 
-static bool loadDWARFDebugInfo(const Twine &dwarfPath) {
+bool loadDWARFDebugInfo(const Twine &dwarfPath) {
   bool result = true;
 
   // Create memory buffer for DWARF file
@@ -149,6 +150,8 @@ static bool loadDWARFDebugInfo(const Twine &dwarfPath) {
 
   return result;
 }
+
+} // namespace
 
 extern "C" {
 
