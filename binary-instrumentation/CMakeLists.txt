@@ -59,3 +59,8 @@ target_link_libraries(collect-trace-preload PRIVATE
   zstd::libzstd_shared
   ${LLVM_LIBS}
 )
+
+# LLVM is usually built without RTTI, so we need to do the same
+target_compile_options(collect-trace-preload PRIVATE
+  -fno-rtti
+)
