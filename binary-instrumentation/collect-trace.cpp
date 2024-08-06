@@ -84,9 +84,13 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
     }
   }
 
-  // By default, only log to trace when stack depth changes
-  if (stackDepthChanged || verbose) {
-    // Reset change tracker
+  const bool stackDepthWillChange =
+      instAnalysis->isCall || instAnalysis->isReturn;
+
+  // By default, only log to trace before and after stack depth changes.
+  // This covers both sides of calls and returns.
+  if (stackDepthWillChange || stackDepthChanged || verbose) {
+    // Reset did change tracker
     stackDepthChanged = false;
 
     printStackDepth();
