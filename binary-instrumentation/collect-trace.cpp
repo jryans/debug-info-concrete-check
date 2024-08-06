@@ -111,7 +111,10 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
       *trace << " at " << lineInfo.FileName << ":" << lineInfo.Line << ":"
              << lineInfo.Column << "\n";
     } else {
-      *trace << "🔔 No info for this address\n";
+      if (instAnalysis->isBranch)
+        *trace << "Jump to external code\n";
+      else
+        *trace << "🔔 No info for this address\n";
     }
 
     // Include disassembly for trace debugging
