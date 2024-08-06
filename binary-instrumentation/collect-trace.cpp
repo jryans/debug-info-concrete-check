@@ -45,7 +45,9 @@ void pushStackFrame() {
 void popStackFrame() {
   if (stackDepth) {
     --stackDepth;
-    stackDepthChanged = true;
+    // We skip the post-return event, as this is not expected to map
+    // to the same source location across versions.
+    // stackDepthChanged = true;
   } else {
     *trace << "🔔 Ignoring return, stack depth would have wrapped around\n";
   }
@@ -88,7 +90,9 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
       instAnalysis->isCall || instAnalysis->isReturn;
 
   // By default, only log to trace before and after stack depth changes.
-  // This covers both sides of calls and returns.
+  // This covers both sides of calls and returns... or it used to!
+  // For returns, we skip the post-return event, as this is not expected to map
+  // to the same source location across versions.
   if (stackDepthWillChange || stackDepthChanged || verbose) {
     // Reset did change tracker
     stackDepthChanged = false;
