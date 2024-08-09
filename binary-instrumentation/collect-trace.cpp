@@ -137,7 +137,9 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
   } else if (instAnalysis->isReturn) {
     // Clear return target when we see an instrumented return
     lastCallReturnTarget = 0;
-    popStackFrame();
+    // If we're returning from `main`, no need to update stack frames
+    if (!lineInfo || lineInfo.FunctionName != "main")
+      popStackFrame();
   }
 
   return QBDI::CONTINUE;
