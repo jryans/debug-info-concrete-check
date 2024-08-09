@@ -220,7 +220,8 @@ int qbdipreload_on_main(int argc, char **argv) {
 int qbdipreload_on_run(QBDI::VMInstanceRef vm, QBDI::rword start,
                        QBDI::rword stop) {
   std::error_code error;
-  trace = std::make_unique<raw_fd_ostream>("trace", error);
+  auto traceName = verbose ? "trace-verbose" : "trace";
+  trace = std::make_unique<raw_fd_ostream>(traceName, error);
   if (error) {
     errs() << "Error: Unable to open trace file\n";
     return QBDIPRELOAD_ERR_STARTUP_FAILED;
