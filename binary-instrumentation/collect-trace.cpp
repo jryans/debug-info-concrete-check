@@ -94,9 +94,6 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
   // For returns, we skip the post-return event, as this is not expected to map
   // to the same source location across versions.
   if (stackDepthWillChange || stackDepthChanged || verbose) {
-    // Reset did change tracker
-    stackDepthChanged = false;
-
     printStackDepth();
 
     // Print address and module name in verbose mode
@@ -125,6 +122,9 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
     if (verbose)
       *trace << instAnalysis->disassembly << "\n";
   }
+
+  // Reset did change tracker
+  stackDepthChanged = false;
 
   // Update stack depth for next instruction after calls and returns
   if (instAnalysis->isCall) {
