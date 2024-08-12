@@ -65,9 +65,16 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
   // TODO: Defer analysis when stack depth unchanged
   QBDI::AnalysisType analysisType = QBDI::ANALYSIS_INSTRUCTION;
   if (verbose)
-    analysisType |= (QBDI::ANALYSIS_DISASSEMBLY | QBDI::ANALYSIS_SYMBOL);
+    analysisType |= QBDI::ANALYSIS_DISASSEMBLY;
   const QBDI::InstAnalysis *instAnalysis = vm->getInstAnalysis(analysisType);
   const auto &address = instAnalysis->address;
+
+  // Print address and disassembly in verbose mode for trace debugging
+  if (verbose) {
+    // 16 hex digits for 64-bit address plus 2 character prefix
+    *trace << format_hex(address, 18) << "\n";
+    *trace << instAnalysis->disassembly << "\n";
+  }
 
   // Look for function name and line info related to this address
   const auto lineInfo = dwarfCtx->getLineInfoForAddress(
@@ -96,13 +103,6 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
   if (stackDepthWillChange || stackDepthChanged || verbose) {
     printStackDepth();
 
-    // Print address and module name in verbose mode
-    if (verbose) {
-      // 16 hex digits for 64-bit address plus 2 character prefix
-      *trace << format_hex(address, 18) << " ";
-      *trace << instAnalysis->moduleName << "`";
-    }
-
     // Print function name and line info
     if (lineInfo) {
       const auto functionOffset = address - *lineInfo.StartAddress;
@@ -117,10 +117,6 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
       else
         *trace << "🔔 No info for this address\n";
     }
-
-    // Include disassembly for trace debugging
-    if (verbose)
-      *trace << instAnalysis->disassembly << "\n";
   }
 
   // Reset did change tracker
