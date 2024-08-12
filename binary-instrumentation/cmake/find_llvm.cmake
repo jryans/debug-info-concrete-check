@@ -142,10 +142,15 @@ else()
     endif()
   endforeach()
 
+  # Collect the source tree include dir
+  _run_llvm_config(_llvm_src_tree_include_dir "--includedir")
+
   set(LLVM_INCLUDE_DIRS "")
   foreach (flag ${_llvm_cpp_flags_list})
     # Filter out -D flags by only looking for -I flags.
-    if ("${flag}" MATCHES "^-I")
+    # Only keep installation include directories
+    # Avoid source tree include directories (which may change over time)
+    if (("${flag}" MATCHES "^-I") AND NOT ("${flag}" STREQUAL "-I${_llvm_src_tree_include_dir}"))
       string(REGEX REPLACE "^-I(.+)$" "\\1" _include_dir "${flag}")
       list(APPEND LLVM_INCLUDE_DIRS "${_include_dir}")
     endif()
