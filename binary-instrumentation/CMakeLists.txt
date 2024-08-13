@@ -31,6 +31,8 @@ set(LLVM_VARS
   LLVM_VERSION_MAJOR
   LLVM_VERSION_MINOR
   LLVM_VERSION_PATCH
+  LLVM_ENABLE_EH
+  LLVM_ENABLE_RTTI
   LLVM_DEFINITIONS
   LLVM_INCLUDE_DIRS
   LLVM_LIBRARY_DIRS
@@ -60,7 +62,14 @@ target_link_libraries(collect-trace-preload PRIVATE
   ${LLVM_LIBS}
 )
 
-# LLVM is usually built without RTTI, so we need to do the same
-target_compile_options(collect-trace-preload PRIVATE
-  -fno-rtti
-)
+# LLVM is usually built without exceptions and RTTI, so we need to do the same
+if(NOT LLVM_ENABLE_EH)
+  target_compile_options(collect-trace-preload PRIVATE
+    -fno-exceptions
+  )
+endif()
+if(NOT LLVM_ENABLE_RTTI)
+  target_compile_options(collect-trace-preload PRIVATE
+    -fno-rtti
+  )
+endif()
