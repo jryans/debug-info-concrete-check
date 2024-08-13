@@ -37,7 +37,7 @@ set(LLVM_VARS
   TARGET_TRIPLE
 )
 
-foreach (vname ${LLVM_VARS})
+foreach(vname ${LLVM_VARS})
   message(STATUS "${vname}: \"${${vname}}\"")
   if (NOT (DEFINED "${vname}"))
     message(FATAL_ERROR "${vname} was not defined")
