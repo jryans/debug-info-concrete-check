@@ -4,6 +4,16 @@ project(debug-info-concrete-check)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# Assertions
+
+# With non-debug builds, CMake automatically defines NDEBUG.
+# We want to preserve assertions in all builds, so we explicitly undefine it.
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+  add_compile_options(-UNDEBUG)
+endif()
+
+# collect-trace-preload
+
 find_package(QBDI REQUIRED)
 find_package(QBDIPreload REQUIRED)
 
