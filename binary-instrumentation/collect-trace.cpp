@@ -1,17 +1,23 @@
+#include <cassert>
 #include <cstddef>
 #include <cstdlib>
 #include <memory>
+#include <optional>
 #include <system_error>
 #include <utility>
+#include <vector>
 
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/DebugInfo/DIContext.h"
+#include "llvm/DebugInfo/DWARF/DWARFCompileUnit.h"
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/DebugInfo/DWARF/DWARFDie.h"
 #include "llvm/Object/Binary.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -26,6 +32,7 @@ namespace {
 void *mainFunc;
 
 bool verbose = false;
+bool printReason = false;
 
 std::unique_ptr<raw_fd_ostream> trace;
 
@@ -33,18 +40,28 @@ std::unique_ptr<MemoryBuffer> dwarfBuffer;
 std::unique_ptr<object::Binary> dwarfBinary;
 std::unique_ptr<DWARFContext> dwarfCtx;
 
-size_t stackDepth = 0;
+// Newest frames are at the end of the stack vector
+std::vector<DWARFDie> stack;
 bool stackDepthChanged = true;
+
+// Initialised to `true` to cover the first instrumented instruction in `main`
+bool lastInstWasCall = true;
 QBDI::rword lastCallReturnTarget = 0;
 
-void pushStackFrame() {
-  ++stackDepth;
+SmallVector<DWARFDie, 4> lastInlinedChain;
+
+void pushStackFrame(const DWARFDie &entry) {
+  stack.push_back(entry);
+  if (verbose)
+    *trace << "push\n";
   stackDepthChanged = true;
 }
 
 void popStackFrame() {
-  if (stackDepth) {
-    --stackDepth;
+  if (!stack.empty()) {
+    stack.pop_back();
+    if (verbose)
+      *trace << "pop\n";
     // We skip the post-return event, as this is not expected to map
     // to the same source location across versions.
     // stackDepthChanged = true;
@@ -56,8 +73,88 @@ void popStackFrame() {
 void printStackDepth() {
   // *trace << format("%4lu", stackDepth) << ": ";
   // Print indentation to represent current stack depth
-  for (size_t i = 0; i < stackDepth; ++i)
+  for (size_t i = 1, e = stack.size(); i < e; ++i)
     *trace << "  ";
+}
+
+void getInlinedChain(const QBDI::rword &address,
+                     SmallVectorImpl<DWARFDie> &inlinedChain) {
+  DWARFCompileUnit *compileUnit =
+      dwarfCtx->getCompileUnitForCodeAddress(address);
+  if (!compileUnit)
+    return;
+  // Stores inlined chain with newest frames at the beginning
+  compileUnit->getInlinedChainForAddress(address, inlinedChain);
+  // Reverse chain so that order matches stack vector
+  // Newest frames are now at the end of the vector
+  std::reverse(inlinedChain.begin(), inlinedChain.end());
+}
+
+enum struct PrintReason {
+  StackDepthWillChange,
+  StackDepthChanged,
+  InlineChainChanged,
+};
+
+inline raw_ostream &operator<<(raw_ostream &trace, const PrintReason &reason) {
+  switch (reason) {
+  case PrintReason::StackDepthWillChange:
+    trace << "SDWC";
+    break;
+  case PrintReason::StackDepthChanged:
+    trace << "SDC";
+    break;
+  case PrintReason::InlineChainChanged:
+    trace << "ICC";
+    break;
+  default:
+    llvm_unreachable("Unexpected PrintReason");
+  }
+  return trace;
+}
+
+void printEventFromLineInfo(
+    const DILineInfo &lineInfo, const PrintReason &reason,
+    const std::optional<QBDI::rword> &address = std::nullopt);
+
+void printEventFromLineInfo(const DILineInfo &lineInfo,
+                            const PrintReason &reason,
+                            const std::optional<QBDI::rword> &address) {
+  printStackDepth();
+  *trace << lineInfo.FunctionName;
+  if (address && verbose) {
+    const auto functionOffset = *address - *lineInfo.StartAddress;
+    *trace << " + " << format_hex(functionOffset, 6);
+  }
+  *trace << " at " << lineInfo.FileName << ":" << lineInfo.Line << ":"
+         << lineInfo.Column;
+  if (printReason)
+    *trace << " (" << reason << ")";
+  *trace << "\n";
+}
+
+void printPreCallEventForInlinedEntry(const DWARFDie &entry) {
+  if (entry.getTag() != dwarf::Tag::DW_TAG_inlined_subroutine)
+    return;
+
+  DILineInfo lineInfo;
+  // Function where simulated call occurred comes from the parent entry
+  lineInfo.FunctionName = entry.getParent().getShortName();
+
+  // Extracted from `DWARFContext::getInliningInfoForAddress`
+  uint32_t callFile = 0, callLine = 0, callColumn = 0, callDisc = 0;
+  entry.getCallerFrame(callFile, callLine, callColumn, callDisc);
+  auto *unit = entry.getDwarfUnit();
+  const auto *lineTable = dwarfCtx->getLineTableForUnit(unit);
+  std::string fileName;
+  lineTable->getFileNameByIndex(callFile, unit->getCompilationDir(),
+                                DILineInfoSpecifier::FileLineInfoKind::RawValue,
+                                fileName);
+  lineInfo.FileName = fileName;
+  lineInfo.Line = callLine;
+  lineInfo.Column = callColumn;
+
+  printEventFromLineInfo(lineInfo, PrintReason::InlineChainChanged);
 }
 
 QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
@@ -77,9 +174,26 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
   }
 
   // Look for function name and line info related to this address
+  // JRS: Remove this and use only the inlined chain...?
   const auto lineInfo = dwarfCtx->getLineInfoForAddress(
       {address}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
                   DILineInfoSpecifier::FunctionNameKind::ShortName});
+
+  // Get the inlined chain for this address
+  SmallVector<DWARFDie, 4> inlinedChain;
+  getInlinedChain(address, inlinedChain);
+
+  // If last instruction was a call, push a new stack frame using the debug
+  // entry inside the callee.
+  if (lastInstWasCall) {
+    lastInstWasCall = false;
+    // If the inlined chain is empty (implying no debug info for this address),
+    // we still push an (empty) entry to record the stack depth change.
+    if (!inlinedChain.empty())
+      pushStackFrame(inlinedChain.back());
+    else
+      pushStackFrame(DWARFDie());
+  }
 
   // If last instrumented instruction was a call, check whether this next
   // instrumented instruction was the call's return target. If yes, it means we
@@ -101,17 +215,14 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
   // For returns, we skip the post-return event, as this is not expected to map
   // to the same source location across versions.
   if (stackDepthWillChange || stackDepthChanged || verbose) {
-    printStackDepth();
-
-    // Print function name and line info
+    // JRS: Replace this block with inlined chain printing...?
     if (lineInfo) {
-      const auto functionOffset = address - *lineInfo.StartAddress;
-      *trace << lineInfo.FunctionName;
-      if (verbose)
-        *trace << " + " << format_hex(functionOffset, 6);
-      *trace << " at " << lineInfo.FileName << ":" << lineInfo.Line << ":"
-             << lineInfo.Column << "\n";
+      const auto reason = stackDepthWillChange
+                              ? PrintReason::StackDepthWillChange
+                              : PrintReason::StackDepthChanged;
+      printEventFromLineInfo(lineInfo, reason, address);
     } else {
+      printStackDepth();
       if (instAnalysis->isBranch)
         *trace << "Jump to external code\n";
       else
@@ -122,9 +233,92 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
   // Reset did change tracker
   stackDepthChanged = false;
 
+  // Compare inlined chain for this address to last chain
+  // TODO: Adjust this logic for multiple active inlined chains
+  if (verbose) {
+    *trace << "Inlined chain:\n";
+    for (const auto &entry : inlinedChain) {
+      *trace << entry.getShortName() << "\n";
+    }
+  }
+  if (!inlinedChain.empty() && lastInlinedChain != inlinedChain) {
+    // Inlined chain has changed since last instruction
+    // Adjust stack frames to match change in inline details
+    // JRS: There's some partial overlap with the non-inlined push / pops...
+    if (verbose)
+      *trace << "Inlined chain changed!\n";
+    // Both the stack and inlined chain vectors are sorted
+    // with newest frames at the end of the vector.
+    const size_t oldChainSize = lastInlinedChain.size();
+    const size_t newChainSize = inlinedChain.size();
+    if (verbose) {
+      *trace << "Old chain: " << oldChainSize << "\n";
+      *trace << "New chain: " << newChainSize << "\n";
+    }
+
+    assert(!stack.empty());
+    // Align inlined chain by finding the oldest chain link in the stack
+    // TODO: Limit search by only looking as far back as old chain size
+    const auto &oldestChainLink = inlinedChain[0];
+    if (verbose)
+      *trace << "Oldest chain link: " << oldestChainLink.getShortName() << "\n";
+    size_t stackIdxOldestChainLink = SIZE_T_MAX;
+    for (size_t i = stack.size(); i--;) {
+      if (verbose)
+        *trace << "stack[" << i << "]: " << stack[i].getShortName() << "\n";
+      if (stack[i] != oldestChainLink)
+        continue;
+      stackIdxOldestChainLink = i;
+      break;
+    }
+    // As long as the stack is not empty,
+    // we should always find at least one chain link in the stack
+    assert(stackIdxOldestChainLink != SIZE_T_MAX);
+
+    // When new inlined chain is smaller, there may extra frames on the stack
+    // beyond the alignment point that should now be removed
+    if (newChainSize < oldChainSize) {
+      for (size_t i = oldChainSize - newChainSize; i--;) {
+        if (stackIdxOldestChainLink + 1 + i >= stack.size())
+          continue;
+        popStackFrame();
+      }
+    }
+
+    // Pop any stack frames not found in the new inlined chain
+    size_t chainIdxNewestMatchingStack = SIZE_T_MAX;
+    assert(newChainSize > 0);
+    for (size_t i = newChainSize; i--;) {
+      if (stackIdxOldestChainLink + i >= stack.size())
+        continue;
+      if (stack[stackIdxOldestChainLink + i] == inlinedChain[i]) {
+        chainIdxNewestMatchingStack = i;
+        break;
+      }
+      popStackFrame();
+    }
+    // From the alignment block above,
+    // we know there must be at least one chain link in the stack
+    assert(chainIdxNewestMatchingStack != SIZE_T_MAX);
+
+    // Push any new frames beyond what is already in the stack
+    for (size_t i = chainIdxNewestMatchingStack + 1; i < newChainSize; ++i) {
+      // Print call frame info _before_ pushing, since simulated call would
+      // have occurred in frame before the one being pushed
+      const auto &entry = inlinedChain[i];
+      printPreCallEventForInlinedEntry(entry);
+      pushStackFrame(entry);
+    }
+
+    // Store chain to check for changes with next instruction
+    lastInlinedChain = inlinedChain;
+  }
+
   // Update stack depth for next instruction after calls and returns
   if (instAnalysis->isCall) {
-    pushStackFrame();
+    // Will push stack frame on next instruction
+    // (so that we push the debug entry for the callee)
+    lastInstWasCall = true;
     // Track address to return to so we can compare to stack value on next
     // instrumented instruction to check whether we followed the call. Compute
     // this manually since this callback sees the pre-instruction register
@@ -207,6 +401,8 @@ int qbdipreload_on_premain(void *gprCtx, void *fpuCtx) {
 int qbdipreload_on_main(int argc, char **argv) {
   if (std::getenv("CON_TRACE_VERBOSE"))
     verbose = true;
+  if (std::getenv("CON_TRACE_REASON"))
+    printReason = true;
 
   StringRef execPath(argv[0]);
   if (!loadDWARFDebugInfo(execPath + ".dwarf"))
