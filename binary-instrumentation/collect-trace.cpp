@@ -93,7 +93,7 @@ void getInlinedChain(const QBDI::rword &address,
 enum struct PrintReason {
   StackDepthWillChange,
   StackDepthChanged,
-  InlineChainChanged,
+  InlinedChainChanged,
   Verbose,
 };
 
@@ -105,7 +105,7 @@ inline raw_ostream &operator<<(raw_ostream &trace, const PrintReason &reason) {
   case PrintReason::StackDepthChanged:
     trace << "SDC";
     break;
-  case PrintReason::InlineChainChanged:
+  case PrintReason::InlinedChainChanged:
     trace << "ICC";
     break;
   case PrintReason::Verbose:
@@ -158,7 +158,7 @@ void printPreCallEventForInlinedEntry(const DWARFDie &entry) {
   lineInfo.Line = callLine;
   lineInfo.Column = callColumn;
 
-  printEventFromLineInfo(lineInfo, PrintReason::InlineChainChanged);
+  printEventFromLineInfo(lineInfo, PrintReason::InlinedChainChanged);
 }
 
 QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
