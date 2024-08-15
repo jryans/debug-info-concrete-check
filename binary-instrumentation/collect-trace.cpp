@@ -211,34 +211,6 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
     }
   }
 
-  const bool stackDepthWillChange =
-      instAnalysis->isCall || instAnalysis->isReturn;
-
-  // By default, only log to trace before and after stack depth changes.
-  // This covers both sides of calls and returns... or it used to!
-  // For returns, we skip the post-return event, as this is not expected to map
-  // to the same source location across versions.
-  if (stackDepthWillChange || stackDepthChanged || verbose) {
-    // JRS: Replace this block with inlined chain printing...?
-    if (lineInfo) {
-      PrintReason reason = PrintReason::Verbose;
-      if (stackDepthWillChange)
-        reason = PrintReason::StackDepthWillChange;
-      if (stackDepthChanged)
-        reason = PrintReason::StackDepthChanged;
-      printEventFromLineInfo(lineInfo, reason, address);
-    } else {
-      printStackDepth();
-      if (instAnalysis->isBranch)
-        *trace << "Jump to external code\n";
-      else
-        *trace << "🔔 No info for this address\n";
-    }
-  }
-
-  // Reset did change tracker
-  stackDepthChanged = false;
-
   // Compare inlined chain for this address to last chain
   // TODO: Adjust this logic for multiple active inlined chains
   if (verbose) {
@@ -314,11 +286,41 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
       const auto &entry = inlinedChain[i];
       printPreCallEventForInlinedEntry(entry);
       pushStackFrame(entry);
+      // JRS: Do we need the "did change" half of regular event printing to move
+      // back above inline processing...?
     }
 
     // Store chain to check for changes with next instruction
     lastInlinedChain = inlinedChain;
   }
+
+  const bool stackDepthWillChange =
+      instAnalysis->isCall || instAnalysis->isReturn;
+
+  // By default, only log to trace before and after stack depth changes.
+  // This covers both sides of calls and returns... or it used to!
+  // For returns, we skip the post-return event, as this is not expected to map
+  // to the same source location across versions.
+  if (stackDepthWillChange || stackDepthChanged || verbose) {
+    // JRS: Replace this block with inlined chain printing...?
+    if (lineInfo) {
+      PrintReason reason = PrintReason::Verbose;
+      if (stackDepthWillChange)
+        reason = PrintReason::StackDepthWillChange;
+      if (stackDepthChanged)
+        reason = PrintReason::StackDepthChanged;
+      printEventFromLineInfo(lineInfo, reason, address);
+    } else {
+      printStackDepth();
+      if (instAnalysis->isBranch)
+        *trace << "Jump to external code\n";
+      else
+        *trace << "🔔 No info for this address\n";
+    }
+  }
+
+  // Reset did change tracker
+  stackDepthChanged = false;
 
   // Update stack depth for next instruction after calls and returns
   if (instAnalysis->isCall) {
