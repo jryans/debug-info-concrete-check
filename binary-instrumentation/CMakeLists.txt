@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.25)
 
 project(debug-info-concrete-check)
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 find_package(QBDI REQUIRED)
 find_package(QBDIPreload REQUIRED)
 
@@ -24,7 +26,7 @@ set_target_properties(collect-trace-preload PROPERTIES
 find_package(ZLIB REQUIRED)
 find_package(zstd REQUIRED)
 
-include(${CMAKE_SOURCE_DIR}/cmake/find_llvm.cmake)
+include(FindLLVM)
 
 set(LLVM_VARS
   LLVM_PACKAGE_VERSION
