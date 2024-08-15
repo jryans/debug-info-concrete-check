@@ -279,6 +279,11 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
     // we know there must be at least one chain link in the stack
     assert(chainIdxNewestMatchingStack != SIZE_T_MAX);
 
+    // Verify that loop below won't stomp on any stack changes
+    // from the last regular instruction
+    if (chainIdxNewestMatchingStack + 1 < newChainSize)
+      assert(!stackDepthChanged);
+
     // Push any new frames beyond what is already in the stack
     for (size_t i = chainIdxNewestMatchingStack + 1; i < newChainSize; ++i) {
       // Print call frame info _before_ pushing, since simulated call would
@@ -286,8 +291,6 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
       const auto &entry = inlinedChain[i];
       printPreCallEventForInlinedEntry(entry);
       pushStackFrame(entry);
-      // JRS: Do we need the "did change" half of regular event printing to move
-      // back above inline processing...?
     }
 
     // Store chain to check for changes with next instruction
