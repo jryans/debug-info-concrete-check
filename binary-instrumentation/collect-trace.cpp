@@ -138,8 +138,7 @@ void printEventFromLineInfo(const DILineInfo &lineInfo,
 }
 
 void printPreCallEventForInlinedEntry(const DWARFDie &entry) {
-  if (entry.getTag() != dwarf::Tag::DW_TAG_inlined_subroutine)
-    return;
+  assert(entry.getTag() == dwarf::Tag::DW_TAG_inlined_subroutine);
 
   DILineInfo lineInfo;
   // Function where simulated call occurred comes from the parent entry
