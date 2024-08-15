@@ -138,6 +138,10 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
       popStackFrame();
   }
 
+  // Add extra line break in verbose mode for readability
+  if (verbose)
+    *trace << "\n";
+
   return QBDI::CONTINUE;
 }
 
