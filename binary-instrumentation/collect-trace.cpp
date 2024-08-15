@@ -93,6 +93,7 @@ void getInlinedChain(const QBDI::rword &address,
 enum struct PrintReason {
   StackDepthWillChange,
   StackDepthChanged,
+  InlinedChainWillChange,
   InlinedChainChanged,
   Verbose,
 };
@@ -104,6 +105,9 @@ inline raw_ostream &operator<<(raw_ostream &trace, const PrintReason &reason) {
     break;
   case PrintReason::StackDepthChanged:
     trace << "SDC";
+    break;
+  case PrintReason::InlinedChainWillChange:
+    trace << "ICWC";
     break;
   case PrintReason::InlinedChainChanged:
     trace << "ICC";
@@ -156,6 +160,21 @@ void printPreCallEventForInlinedEntry(const DWARFDie &entry) {
   lineInfo.FileName = fileName;
   lineInfo.Line = callLine;
   lineInfo.Column = callColumn;
+
+  printEventFromLineInfo(lineInfo, PrintReason::InlinedChainWillChange);
+}
+
+void printPostCallEventForInlinedEntry(const DWARFDie &entry) {
+  assert(entry.getTag() == dwarf::Tag::DW_TAG_inlined_subroutine);
+
+  DILineInfo lineInfo;
+  lineInfo.FunctionName = entry.getShortName();
+
+  // Use decl. file and line from abstract origin entry
+  lineInfo.FileName =
+      entry.getDeclFile(DILineInfoSpecifier::FileLineInfoKind::RawValue);
+  lineInfo.Line = entry.getDeclLine();
+  lineInfo.Column = 0;
 
   printEventFromLineInfo(lineInfo, PrintReason::InlinedChainChanged);
 }
@@ -290,6 +309,7 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
       const auto &entry = inlinedChain[i];
       printPreCallEventForInlinedEntry(entry);
       pushStackFrame(entry);
+      printPostCallEventForInlinedEntry(entry);
     }
 
     // Store chain to check for changes with next instruction
