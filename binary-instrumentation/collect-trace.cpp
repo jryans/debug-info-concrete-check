@@ -94,6 +94,7 @@ enum struct PrintReason {
   StackDepthWillChange,
   StackDepthChanged,
   InlineChainChanged,
+  Verbose,
 };
 
 inline raw_ostream &operator<<(raw_ostream &trace, const PrintReason &reason) {
@@ -106,6 +107,9 @@ inline raw_ostream &operator<<(raw_ostream &trace, const PrintReason &reason) {
     break;
   case PrintReason::InlineChainChanged:
     trace << "ICC";
+    break;
+  case PrintReason::Verbose:
+    trace << "V";
     break;
   default:
     llvm_unreachable("Unexpected PrintReason");
@@ -217,9 +221,11 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
   if (stackDepthWillChange || stackDepthChanged || verbose) {
     // JRS: Replace this block with inlined chain printing...?
     if (lineInfo) {
-      const auto reason = stackDepthWillChange
-                              ? PrintReason::StackDepthWillChange
-                              : PrintReason::StackDepthChanged;
+      PrintReason reason = PrintReason::Verbose;
+      if (stackDepthWillChange)
+        reason = PrintReason::StackDepthWillChange;
+      if (stackDepthChanged)
+        reason = PrintReason::StackDepthChanged;
       printEventFromLineInfo(lineInfo, reason, address);
     } else {
       printStackDepth();
