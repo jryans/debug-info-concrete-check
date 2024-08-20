@@ -146,7 +146,13 @@ void printPreCallEventForInlinedEntry(const DWARFDie &entry) {
 
   DILineInfo lineInfo;
   // Function where simulated call occurred comes from the parent entry
-  lineInfo.FunctionName = entry.getParent().getShortName();
+  DWARFDie parent = entry.getParent();
+  // Skip over any lexical blocks in the parent chain
+  while (parent.isValid() && !parent.isSubroutineDIE()) {
+    parent = parent.getParent();
+  }
+  assert(parent.isValid());
+  lineInfo.FunctionName = parent.getShortName();
 
   // Extracted from `DWARFContext::getInliningInfoForAddress`
   uint32_t callFile = 0, callLine = 0, callColumn = 0, callDisc = 0;
