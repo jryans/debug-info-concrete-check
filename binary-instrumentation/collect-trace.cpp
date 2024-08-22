@@ -32,7 +32,7 @@ namespace {
 void *mainFunc;
 
 bool verbose = false;
-bool printReason = false;
+bool printSource = false;
 
 std::unique_ptr<raw_fd_ostream> trace;
 
@@ -62,7 +62,7 @@ void popStackFrame() {
     stack.pop_back();
     if (verbose)
       *trace << "pop\n";
-    // We skip the post-return event, as this is not expected to map
+    // We skip the "return to" event, as this is not expected to map
     // to the same source location across versions.
     // stackDepthChanged = true;
   } else {
@@ -90,47 +90,55 @@ void getInlinedChain(const QBDI::rword &address,
   std::reverse(inlinedChain.begin(), inlinedChain.end());
 }
 
-enum struct PrintReason {
-  StackDepthWillChange,
-  StackDepthChanged,
-  InlinedChainWillChange,
-  InlinedChainChanged,
+enum struct EventType {
+  CallFrom,
+  CallTo,
+  ReturnFrom,
   Verbose,
 };
 
-inline raw_ostream &operator<<(raw_ostream &trace, const PrintReason &reason) {
-  switch (reason) {
-  case PrintReason::StackDepthWillChange:
-    trace << "SDWC";
+inline raw_ostream &operator<<(raw_ostream &trace, const EventType &type) {
+  switch (type) {
+  case EventType::CallFrom:
+    trace << "CF";
     break;
-  case PrintReason::StackDepthChanged:
-    trace << "SDC";
+  case EventType::CallTo:
+    trace << "CT";
     break;
-  case PrintReason::InlinedChainWillChange:
-    trace << "ICWC";
+  case EventType::ReturnFrom:
+    trace << "RF";
     break;
-  case PrintReason::InlinedChainChanged:
-    trace << "ICC";
-    break;
-  case PrintReason::Verbose:
+  case EventType::Verbose:
     trace << "V";
     break;
   default:
-    llvm_unreachable("Unexpected PrintReason");
+    llvm_unreachable("Unexpected EventType");
   }
   return trace;
 }
 
+enum struct EventSource {
+  Stack,
+  InlinedChain,
+  Verbose,
+};
+
 void printEventFromLineInfo(
-    const DILineInfo &lineInfo, const PrintReason &reason,
+    const DILineInfo &lineInfo, const EventType &type,
+    const EventSource &source,
     const std::optional<QBDI::rword> &address = std::nullopt,
     const std::optional<bool> &isBranch = std::nullopt);
 
-void printEventFromLineInfo(const DILineInfo &lineInfo,
-                            const PrintReason &reason,
+void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
+                            const EventSource &source,
                             const std::optional<QBDI::rword> &address,
                             const std::optional<bool> &isBranch) {
   printStackDepth();
+  if (printSource && source == EventSource::InlinedChain) {
+    *trace << "I";
+  }
+  *trace << type;
+  *trace << ": ";
   if (lineInfo) {
     *trace << lineInfo.FunctionName;
     if (address && verbose) {
@@ -145,12 +153,10 @@ void printEventFromLineInfo(const DILineInfo &lineInfo,
     else
       *trace << "🔔 No info for this address";
   }
-  if (printReason)
-    *trace << " (" << reason << ")";
   *trace << "\n";
 }
 
-void printPreCallEventForInlinedEntry(const DWARFDie &entry) {
+void printCallFromEventForInlinedEntry(const DWARFDie &entry) {
   assert(entry.getTag() == dwarf::Tag::DW_TAG_inlined_subroutine);
 
   DILineInfo lineInfo;
@@ -176,10 +182,11 @@ void printPreCallEventForInlinedEntry(const DWARFDie &entry) {
   lineInfo.Line = callLine;
   lineInfo.Column = callColumn;
 
-  printEventFromLineInfo(lineInfo, PrintReason::InlinedChainWillChange);
+  printEventFromLineInfo(lineInfo, EventType::CallFrom,
+                         EventSource::InlinedChain);
 }
 
-void printPostCallEventForInlinedEntry(const DWARFDie &entry) {
+void printCallToEventForInlinedEntry(const DWARFDie &entry) {
   assert(entry.getTag() == dwarf::Tag::DW_TAG_inlined_subroutine);
 
   DILineInfo lineInfo;
@@ -191,7 +198,8 @@ void printPostCallEventForInlinedEntry(const DWARFDie &entry) {
   lineInfo.Line = entry.getDeclLine();
   lineInfo.Column = 0;
 
-  printEventFromLineInfo(lineInfo, PrintReason::InlinedChainChanged);
+  printEventFromLineInfo(lineInfo, EventType::CallTo,
+                         EventSource::InlinedChain);
 }
 
 QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
@@ -249,14 +257,14 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
 
   // In verbose mode, log this instruction, but only if other blocks will not
   if (verbose && !stackDepthWillChange && !stackDepthChanged) {
-    printEventFromLineInfo(lineInfo, PrintReason::Verbose, address,
-                           instAnalysis->isBranch);
+    printEventFromLineInfo(lineInfo, EventType::Verbose, EventSource::Verbose,
+                           address, instAnalysis->isBranch);
   }
 
   // Log to trace after stack depth changed (by previous instruction)
   if (stackDepthChanged) {
-    printEventFromLineInfo(lineInfo, PrintReason::StackDepthChanged, address,
-                           instAnalysis->isBranch);
+    printEventFromLineInfo(lineInfo, EventType::CallTo, EventSource::Stack,
+                           address, instAnalysis->isBranch);
   }
 
   // Reset did change tracker
@@ -335,9 +343,9 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
       // Print call frame info _before_ pushing, since simulated call would
       // have occurred in frame before the one being pushed
       const auto &entry = inlinedChain[i];
-      printPreCallEventForInlinedEntry(entry);
+      printCallFromEventForInlinedEntry(entry);
       pushStackFrame(entry);
-      printPostCallEventForInlinedEntry(entry);
+      printCallToEventForInlinedEntry(entry);
     }
 
     // Store chain to check for changes with next instruction
@@ -346,7 +354,9 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
 
   // Log to trace before stack depth changes (by this instruction)
   if (stackDepthWillChange) {
-    printEventFromLineInfo(lineInfo, PrintReason::StackDepthWillChange, address,
+    EventType type =
+        instAnalysis->isCall ? EventType::CallFrom : EventType::ReturnFrom;
+    printEventFromLineInfo(lineInfo, type, EventSource::Stack, address,
                            instAnalysis->isBranch);
   }
 
@@ -437,8 +447,8 @@ int qbdipreload_on_premain(void *gprCtx, void *fpuCtx) {
 int qbdipreload_on_main(int argc, char **argv) {
   if (std::getenv("CON_TRACE_VERBOSE"))
     verbose = true;
-  if (std::getenv("CON_TRACE_REASON"))
-    printReason = true;
+  if (std::getenv("CON_TRACE_SOURCE"))
+    printSource = true;
 
   StringRef execPath(argv[0]);
   if (!loadDWARFDebugInfo(execPath + ".dwarf"))
