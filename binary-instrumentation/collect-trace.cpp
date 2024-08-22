@@ -54,7 +54,10 @@ void pushStackFrame(const DWARFDie &entry) {
   stack.push_back(entry);
   if (verbose)
     *trace << "push\n";
-  stackDepthChanged = true;
+  // Only non-inlined entries notify stack depth changes for event printing
+  // Inlined chain processing handles printing all inlined entries when needed
+  if (!entry || entry.isSubprogramDIE())
+    stackDepthChanged = true;
 }
 
 void popStackFrame() {
