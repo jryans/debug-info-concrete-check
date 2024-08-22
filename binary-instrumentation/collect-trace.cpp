@@ -202,6 +202,24 @@ void printCallToEventForInlinedEntry(const DWARFDie &entry) {
                          EventSource::InlinedChain);
 }
 
+void printReturnFromEventForInlinedEntry(const DWARFDie &entry) {
+  assert(entry.getTag() == dwarf::Tag::DW_TAG_inlined_subroutine);
+
+  DILineInfo lineInfo;
+  lineInfo.FunctionName = entry.getShortName();
+
+  // Use decl. file from abstract origin entry
+  lineInfo.FileName =
+      entry.getDeclFile(DILineInfoSpecifier::FileLineInfoKind::RawValue);
+  // Function epilogue location not generally available when inlined
+  // TODO: Look potential out-of-line copy, borrow its location
+  lineInfo.Line = 0;
+  lineInfo.Column = 0;
+
+  printEventFromLineInfo(lineInfo, EventType::ReturnFrom,
+                         EventSource::InlinedChain);
+}
+
 QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
                              QBDI::FPRState *fprState, void *data) {
   // TODO: Defer analysis when stack depth unchanged
@@ -318,6 +336,7 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
       for (size_t i = oldChainSize - newChainSize; i--;) {
         if (stackIdxOldestChainLink + 1 + i >= stack.size())
           continue;
+        printReturnFromEventForInlinedEntry(stack.back());
         popStackFrame();
       }
     }
@@ -332,6 +351,7 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
         chainIdxNewestMatchingStack = i;
         break;
       }
+      printReturnFromEventForInlinedEntry(stack.back());
       popStackFrame();
     }
     // From the alignment block above,
