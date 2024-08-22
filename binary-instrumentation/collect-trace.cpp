@@ -235,6 +235,42 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
     }
   }
 
+  const bool stackDepthWillChange =
+      instAnalysis->isCall || instAnalysis->isReturn;
+
+  // In verbose mode, log this instruction, but only if other blocks will not
+  if (verbose && !stackDepthWillChange && !stackDepthChanged) {
+    // JRS: Replace this block with inlined chain printing...?
+    if (lineInfo) {
+      PrintReason reason = PrintReason::Verbose;
+      printEventFromLineInfo(lineInfo, reason, address);
+    } else {
+      printStackDepth();
+      if (instAnalysis->isBranch)
+        *trace << "Jump to external code\n";
+      else
+        *trace << "🔔 No info for this address\n";
+    }
+  }
+
+  // Log to trace after stack depth changed (by previous instruction)
+  if (stackDepthChanged) {
+    // JRS: Replace this block with inlined chain printing...?
+    if (lineInfo) {
+      PrintReason reason = PrintReason::StackDepthChanged;
+      printEventFromLineInfo(lineInfo, reason, address);
+    } else {
+      printStackDepth();
+      if (instAnalysis->isBranch)
+        *trace << "Jump to external code\n";
+      else
+        *trace << "🔔 No info for this address\n";
+    }
+  }
+
+  // Reset did change tracker
+  stackDepthChanged = false;
+
   // Compare inlined chain for this address to last chain
   // TODO: Adjust this logic for multiple active inlined chains
   if (verbose) {
@@ -303,11 +339,6 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
     // we know there must be at least one chain link in the stack
     assert(chainIdxNewestMatchingStack != SIZE_T_MAX);
 
-    // Verify that loop below won't stomp on any stack changes
-    // from the last regular instruction
-    if (chainIdxNewestMatchingStack + 1 < newChainSize)
-      assert(!stackDepthChanged);
-
     // Push any new frames beyond what is already in the stack
     for (size_t i = chainIdxNewestMatchingStack + 1; i < newChainSize; ++i) {
       // Print call frame info _before_ pushing, since simulated call would
@@ -322,21 +353,11 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
     lastInlinedChain = inlinedChain;
   }
 
-  const bool stackDepthWillChange =
-      instAnalysis->isCall || instAnalysis->isReturn;
-
-  // By default, only log to trace before and after stack depth changes.
-  // This covers both sides of calls and returns... or it used to!
-  // For returns, we skip the post-return event, as this is not expected to map
-  // to the same source location across versions.
-  if (stackDepthWillChange || stackDepthChanged || verbose) {
+  // Log to trace before stack depth changes (by this instruction)
+  if (stackDepthWillChange) {
     // JRS: Replace this block with inlined chain printing...?
     if (lineInfo) {
-      PrintReason reason = PrintReason::Verbose;
-      if (stackDepthWillChange)
-        reason = PrintReason::StackDepthWillChange;
-      if (stackDepthChanged)
-        reason = PrintReason::StackDepthChanged;
+      PrintReason reason = PrintReason::StackDepthWillChange;
       printEventFromLineInfo(lineInfo, reason, address);
     } else {
       printStackDepth();
@@ -346,9 +367,6 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
         *trace << "🔔 No info for this address\n";
     }
   }
-
-  // Reset did change tracker
-  stackDepthChanged = false;
 
   // Update stack depth for next instruction after calls and returns
   if (instAnalysis->isCall) {
