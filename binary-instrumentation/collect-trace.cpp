@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <system_error>
@@ -33,6 +34,7 @@ void *mainFunc;
 
 bool verbose = false;
 bool printSource = false;
+bool printLocation = true;
 
 std::unique_ptr<raw_fd_ostream> trace;
 
@@ -148,8 +150,9 @@ void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
       const auto functionOffset = *address - *lineInfo.StartAddress;
       *trace << " + " << format_hex(functionOffset, 6);
     }
-    *trace << " at " << lineInfo.FileName << ":" << lineInfo.Line << ":"
-           << lineInfo.Column;
+    if (printLocation)
+      *trace << " at " << lineInfo.FileName << ":" << lineInfo.Line << ":"
+             << lineInfo.Column;
   } else {
     if (isBranch && *isBranch)
       *trace << "Jump to external code";
@@ -475,6 +478,9 @@ int qbdipreload_on_main(int argc, char **argv) {
     verbose = true;
   if (std::getenv("CON_TRACE_SOURCE"))
     printSource = true;
+  if (std::getenv("CON_TRACE_LOCATION") &&
+      !std::strcmp(std::getenv("CON_TRACE_LOCATION"), "0"))
+    printLocation = false;
 
   StringRef execPath(argv[0]);
   if (!loadDWARFDebugInfo(execPath + ".dwarf"))
