@@ -123,19 +123,28 @@ inline raw_ostream &operator<<(raw_ostream &trace, const PrintReason &reason) {
 
 void printEventFromLineInfo(
     const DILineInfo &lineInfo, const PrintReason &reason,
-    const std::optional<QBDI::rword> &address = std::nullopt);
+    const std::optional<QBDI::rword> &address = std::nullopt,
+    const std::optional<bool> &isBranch = std::nullopt);
 
 void printEventFromLineInfo(const DILineInfo &lineInfo,
                             const PrintReason &reason,
-                            const std::optional<QBDI::rword> &address) {
+                            const std::optional<QBDI::rword> &address,
+                            const std::optional<bool> &isBranch) {
   printStackDepth();
-  *trace << lineInfo.FunctionName;
-  if (address && verbose) {
-    const auto functionOffset = *address - *lineInfo.StartAddress;
-    *trace << " + " << format_hex(functionOffset, 6);
+  if (lineInfo) {
+    *trace << lineInfo.FunctionName;
+    if (address && verbose) {
+      const auto functionOffset = *address - *lineInfo.StartAddress;
+      *trace << " + " << format_hex(functionOffset, 6);
+    }
+    *trace << " at " << lineInfo.FileName << ":" << lineInfo.Line << ":"
+           << lineInfo.Column;
+  } else {
+    if (isBranch && *isBranch)
+      *trace << "Jump to external code";
+    else
+      *trace << "🔔 No info for this address";
   }
-  *trace << " at " << lineInfo.FileName << ":" << lineInfo.Line << ":"
-         << lineInfo.Column;
   if (printReason)
     *trace << " (" << reason << ")";
   *trace << "\n";
@@ -240,32 +249,14 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
 
   // In verbose mode, log this instruction, but only if other blocks will not
   if (verbose && !stackDepthWillChange && !stackDepthChanged) {
-    // JRS: Replace this block with inlined chain printing...?
-    if (lineInfo) {
-      PrintReason reason = PrintReason::Verbose;
-      printEventFromLineInfo(lineInfo, reason, address);
-    } else {
-      printStackDepth();
-      if (instAnalysis->isBranch)
-        *trace << "Jump to external code\n";
-      else
-        *trace << "🔔 No info for this address\n";
-    }
+    printEventFromLineInfo(lineInfo, PrintReason::Verbose, address,
+                           instAnalysis->isBranch);
   }
 
   // Log to trace after stack depth changed (by previous instruction)
   if (stackDepthChanged) {
-    // JRS: Replace this block with inlined chain printing...?
-    if (lineInfo) {
-      PrintReason reason = PrintReason::StackDepthChanged;
-      printEventFromLineInfo(lineInfo, reason, address);
-    } else {
-      printStackDepth();
-      if (instAnalysis->isBranch)
-        *trace << "Jump to external code\n";
-      else
-        *trace << "🔔 No info for this address\n";
-    }
+    printEventFromLineInfo(lineInfo, PrintReason::StackDepthChanged, address,
+                           instAnalysis->isBranch);
   }
 
   // Reset did change tracker
@@ -355,17 +346,8 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
 
   // Log to trace before stack depth changes (by this instruction)
   if (stackDepthWillChange) {
-    // JRS: Replace this block with inlined chain printing...?
-    if (lineInfo) {
-      PrintReason reason = PrintReason::StackDepthWillChange;
-      printEventFromLineInfo(lineInfo, reason, address);
-    } else {
-      printStackDepth();
-      if (instAnalysis->isBranch)
-        *trace << "Jump to external code\n";
-      else
-        *trace << "🔔 No info for this address\n";
-    }
+    printEventFromLineInfo(lineInfo, PrintReason::StackDepthWillChange, address,
+                           instAnalysis->isBranch);
   }
 
   // Update stack depth for next instruction after calls and returns
