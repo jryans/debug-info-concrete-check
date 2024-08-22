@@ -318,8 +318,10 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
     // Align inlined chain by finding the oldest chain link in the stack
     // TODO: Limit search by only looking as far back as old chain size
     const auto &oldestChainLink = inlinedChain[0];
-    if (verbose)
+    if (verbose) {
+      *trace << "Aligning inlined chain\n";
       *trace << "Oldest chain link: " << oldestChainLink.getShortName() << "\n";
+    }
     size_t stackIdxOldestChainLink = SIZE_T_MAX;
     for (size_t i = stack.size(); i--;) {
       if (verbose)
@@ -333,24 +335,23 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
     // we should always find at least one chain link in the stack
     assert(stackIdxOldestChainLink != SIZE_T_MAX);
 
-    // When new inlined chain is smaller, there may extra frames on the stack
-    // beyond the alignment point that should now be removed
-    if (newChainSize < oldChainSize) {
-      for (size_t i = oldChainSize - newChainSize; i--;) {
-        if (stackIdxOldestChainLink + 1 + i >= stack.size())
-          continue;
-        printReturnFromEventForInlinedEntry(stack.back());
-        popStackFrame();
-      }
-    }
-
     // Pop any stack frames not found in the new inlined chain
     size_t chainIdxNewestMatchingStack = SIZE_T_MAX;
-    assert(newChainSize > 0);
-    for (size_t i = newChainSize; i--;) {
-      if (stackIdxOldestChainLink + i >= stack.size())
-        continue;
-      if (stack[stackIdxOldestChainLink + i] == inlinedChain[i]) {
+    size_t stackItemsToCheck = stack.size() - stackIdxOldestChainLink;
+    if (verbose)
+      *trace << "Popping any frames not found\n";
+    for (size_t i = stackItemsToCheck; i--;) {
+      if (verbose) {
+        *trace << "stack[" << stackIdxOldestChainLink + i << "]: ";
+        *trace << stack[stackIdxOldestChainLink + i].getShortName() << "\n";
+        *trace << "inlinedChain[" << i << "]: ";
+        if (i < newChainSize)
+          *trace << inlinedChain[i].getShortName() << "\n";
+        else
+          *trace << "past end of chain\n";
+      }
+      if (i < newChainSize &&
+          stack[stackIdxOldestChainLink + i] == inlinedChain[i]) {
         chainIdxNewestMatchingStack = i;
         break;
       }
@@ -362,6 +363,8 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
     assert(chainIdxNewestMatchingStack != SIZE_T_MAX);
 
     // Push any new frames beyond what is already in the stack
+    if (verbose)
+      *trace << "Pushing any new frames\n";
     for (size_t i = chainIdxNewestMatchingStack + 1; i < newChainSize; ++i) {
       // Print call frame info _before_ pushing, since simulated call would
       // have occurred in frame before the one being pushed
