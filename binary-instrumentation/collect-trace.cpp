@@ -35,6 +35,7 @@ void *mainFunc;
 bool verbose = false;
 bool printSource = false;
 bool printLocation = true;
+bool printReturnFromLocation = true;
 
 std::unique_ptr<raw_fd_ostream> trace;
 
@@ -128,6 +129,14 @@ enum struct EventSource {
   Verbose,
 };
 
+bool isLocationPrintable(const EventType &type) {
+  if (!printLocation)
+    return false;
+  if (type == EventType::ReturnFrom && !printReturnFromLocation)
+    return false;
+  return true;
+}
+
 void printEventFromLineInfo(
     const DILineInfo &lineInfo, const EventType &type,
     const EventSource &source,
@@ -150,7 +159,7 @@ void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
       const auto functionOffset = *address - *lineInfo.StartAddress;
       *trace << " + " << format_hex(functionOffset, 6);
     }
-    if (printLocation)
+    if (isLocationPrintable(type))
       *trace << " at " << lineInfo.FileName << ":" << lineInfo.Line << ":"
              << lineInfo.Column;
   } else {
@@ -481,6 +490,9 @@ int qbdipreload_on_main(int argc, char **argv) {
   if (std::getenv("CON_TRACE_LOCATION") &&
       !std::strcmp(std::getenv("CON_TRACE_LOCATION"), "0"))
     printLocation = false;
+  if (std::getenv("CON_TRACE_RF_LOCATION") &&
+      !std::strcmp(std::getenv("CON_TRACE_RF_LOCATION"), "0"))
+    printReturnFromLocation = false;
 
   StringRef execPath(argv[0]);
   if (!loadDWARFDebugInfo(execPath + ".dwarf"))
