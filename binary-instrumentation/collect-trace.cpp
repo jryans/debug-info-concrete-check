@@ -159,9 +159,9 @@ void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
       const auto functionOffset = *address - *lineInfo.StartAddress;
       *trace << " + " << format_hex(functionOffset, 6);
     }
+    *trace << " at " << lineInfo.FileName;
     if (isLocationPrintable(type))
-      *trace << " at " << lineInfo.FileName << ":" << lineInfo.Line << ":"
-             << lineInfo.Column;
+      *trace << ":" << lineInfo.Line << ":" << lineInfo.Column;
   } else {
     if (isBranch && *isBranch)
       *trace << "Jump to external code";
