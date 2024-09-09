@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <system_error>
@@ -36,6 +37,7 @@ bool verbose = false;
 bool printSource = false;
 bool printLocation = true;
 bool printReturnFromLocation = true;
+bool includeExternal = true;
 
 std::unique_ptr<raw_fd_ostream> trace;
 
@@ -52,6 +54,8 @@ bool lastInstWasCall = true;
 QBDI::rword lastCallReturnTarget = 0;
 
 SmallVector<DWARFDie, 4> lastInlinedChain;
+
+std::optional<std::function<void()>> queuedEvent;
 
 void pushStackFrame(const DWARFDie &entry) {
   stack.push_back(entry);
@@ -76,10 +80,14 @@ void popStackFrame() {
   }
 }
 
-void printStackDepth() {
+// Defaults to current depth, but non-current depth can also be passed in
+void printStackDepth(const std::optional<size_t> &depth = std::nullopt);
+
+void printStackDepth(const std::optional<size_t> &depth) {
+  const size_t stackDepth = depth.value_or(stack.size());
   // *trace << format("%4lu", stackDepth) << ": ";
   // Print indentation to represent current stack depth
-  for (size_t i = 1, e = stack.size(); i < e; ++i)
+  for (size_t i = 1; i < stackDepth; ++i)
     *trace << "  ";
 }
 
@@ -141,13 +149,15 @@ void printEventFromLineInfo(
     const DILineInfo &lineInfo, const EventType &type,
     const EventSource &source,
     const std::optional<QBDI::rword> &address = std::nullopt,
-    const std::optional<bool> &isBranch = std::nullopt);
+    const std::optional<bool> &isBranch = std::nullopt,
+    const std::optional<size_t> &depth = std::nullopt);
 
 void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
                             const EventSource &source,
                             const std::optional<QBDI::rword> &address,
-                            const std::optional<bool> &isBranch) {
-  printStackDepth();
+                            const std::optional<bool> &isBranch,
+                            const std::optional<size_t> &depth) {
+  printStackDepth(depth);
   if (printSource && source == EventSource::InlinedChain) {
     *trace << "I";
   }
@@ -257,6 +267,19 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
       {address}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
                   DILineInfoSpecifier::FunctionNameKind::ShortName});
 
+  // If we're jumping to external code, we may have a queued "call to" event
+  // that needs to be checked against our filters before printing
+  const bool isBranchToExternal = !lineInfo && instAnalysis->isBranch;
+  if (isBranchToExternal && !includeExternal) {
+    queuedEvent = std::nullopt;
+  }
+
+  // If there's an event queued, print that now
+  if (queuedEvent) {
+    (*queuedEvent)();
+    queuedEvent = std::nullopt;
+  }
+
   // Get the inlined chain for this address
   SmallVector<DWARFDie, 4> inlinedChain;
   getInlinedChain(address, inlinedChain);
@@ -295,7 +318,7 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
   }
 
   // Log to trace after stack depth changed (by previous instruction)
-  if (stackDepthChanged) {
+  if (stackDepthChanged && (!isBranchToExternal || includeExternal)) {
     printEventFromLineInfo(lineInfo, EventType::CallTo, EventSource::Stack,
                            address, instAnalysis->isBranch);
   }
@@ -394,8 +417,12 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
   if (stackDepthWillChange) {
     EventType type =
         instAnalysis->isCall ? EventType::CallFrom : EventType::ReturnFrom;
-    printEventFromLineInfo(lineInfo, type, EventSource::Stack, address,
-                           instAnalysis->isBranch);
+    // Capture current stack depth for future printing
+    const size_t depth = stack.size();
+    queuedEvent = [=]() {
+      printEventFromLineInfo(lineInfo, type, EventSource::Stack, address,
+                             instAnalysis->isBranch, depth);
+    };
   }
 
   // Update stack depth for next instruction after calls and returns
@@ -493,6 +520,9 @@ int qbdipreload_on_main(int argc, char **argv) {
   if (std::getenv("CON_TRACE_RF_LOCATION") &&
       !std::strcmp(std::getenv("CON_TRACE_RF_LOCATION"), "0"))
     printReturnFromLocation = false;
+  if (std::getenv("CON_TRACE_EXTERNAL") &&
+      !std::strcmp(std::getenv("CON_TRACE_EXTERNAL"), "0"))
+    includeExternal = false;
 
   StringRef execPath(argv[0]);
   if (!loadDWARFDebugInfo(execPath + ".dwarf"))
