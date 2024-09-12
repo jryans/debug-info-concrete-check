@@ -38,6 +38,7 @@ bool printSource = false;
 bool printLocation = true;
 bool printReturnFromLocation = true;
 bool includeExternalLibary = true;
+bool includeInternalFunction = true;
 
 std::unique_ptr<raw_fd_ostream> trace;
 
@@ -53,6 +54,7 @@ bool stackDepthChanged = true;
 bool lastInstWasCall = true;
 QBDI::rword lastCallReturnTarget = 0;
 
+SmallVector<DWARFDie, 4> inlinedChain;
 SmallVector<DWARFDie, 4> lastInlinedChain;
 
 std::optional<std::function<void()>> queuedEvent;
@@ -137,6 +139,27 @@ enum struct EventSource {
   Verbose,
 };
 
+bool isFunctionPrintable() {
+  if (includeInternalFunction)
+    return true;
+  // Filter only applies to subprogram (non-inlined) functions
+  if (inlinedChain.size() != 1)
+    return true;
+  // Look for a possible subprogram (non-inlined function) entry
+  DWARFDie entry = inlinedChain.back();
+  // Skip over any lexical blocks in the parent chain
+  while (entry.isValid() && !entry.isSubroutineDIE()) {
+    entry = entry.getParent();
+  }
+  assert(entry.isValid() && entry.isSubprogramDIE());
+  // Check `external` attribute on subprogram entry
+  if (const auto attrValue = entry.find(dwarf::DW_AT_external)) {
+    return attrValue->getRawUValue();
+  }
+  // Assume internal if no attribute found
+  return false;
+}
+
 bool isLocationPrintable(const EventType &type) {
   if (!printLocation)
     return false;
@@ -157,6 +180,8 @@ void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
                             const std::optional<QBDI::rword> &address,
                             const std::optional<bool> &isBranch,
                             const std::optional<size_t> &depth) {
+  if (!isFunctionPrintable())
+    return;
   printStackDepth(depth);
   if (printSource && source == EventSource::InlinedChain) {
     *trace << "I";
@@ -274,15 +299,15 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
     queuedEvent = std::nullopt;
   }
 
+  // Get the inlined chain for this address
+  inlinedChain.clear();
+  getInlinedChain(address, inlinedChain);
+
   // If there's an event queued, print that now
   if (queuedEvent) {
     (*queuedEvent)();
     queuedEvent = std::nullopt;
   }
-
-  // Get the inlined chain for this address
-  SmallVector<DWARFDie, 4> inlinedChain;
-  getInlinedChain(address, inlinedChain);
 
   // If last instruction was a call, push a new stack frame using the debug
   // entry inside the callee.
@@ -415,14 +440,21 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
 
   // Log to trace before stack depth changes (by this instruction)
   if (stackDepthWillChange) {
-    EventType type =
-        instAnalysis->isCall ? EventType::CallFrom : EventType::ReturnFrom;
-    // Capture current stack depth for future printing
     const size_t depth = stack.size();
-    queuedEvent = [=]() {
-      printEventFromLineInfo(lineInfo, type, EventSource::Stack, address,
+    if (instAnalysis->isCall) {
+      // Queue for (potential) future printing based on next instruction
+      queuedEvent = [=]() {
+        // Will have access to the _next_ instruction's inlined chain when run
+        printEventFromLineInfo(lineInfo, EventType::CallFrom,
+                               EventSource::Stack, address,
+                               instAnalysis->isBranch, depth);
+      };
+    } else {
+      // Print immediately
+      printEventFromLineInfo(lineInfo, EventType::ReturnFrom,
+                             EventSource::Stack, address,
                              instAnalysis->isBranch, depth);
-    };
+    }
   }
 
   // Update stack depth for next instruction after calls and returns
@@ -523,6 +555,9 @@ int qbdipreload_on_main(int argc, char **argv) {
   if (std::getenv("CON_TRACE_EXTERNAL_LIBRARY") &&
       !std::strcmp(std::getenv("CON_TRACE_EXTERNAL_LIBRARY"), "0"))
     includeExternalLibary = false;
+  if (std::getenv("CON_TRACE_INTERNAL_FUNCTION") &&
+      !std::strcmp(std::getenv("CON_TRACE_INTERNAL_FUNCTION"), "0"))
+    includeInternalFunction = false;
 
   StringRef execPath(argv[0]);
   if (!loadDWARFDebugInfo(execPath + ".dwarf"))
