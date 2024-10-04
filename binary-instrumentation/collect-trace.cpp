@@ -364,7 +364,7 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
 
   // Examine branches in case they are actually tail calls
   bool isTailCall = false;
-  if (instAnalysis->isBranch) {
+  if (instAnalysis->isBranch && !inlinedChain.empty()) {
     const auto callSite = getCallSiteEntry(inlinedChain.back(), address);
     if (const auto attrValue = callSite.find(dwarf::DW_AT_call_tail_call)) {
       // Branch is a tail call
@@ -525,7 +525,7 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
 
   // Also return from any artificial frames from past tail calls
   if (instAnalysis->isReturn) {
-    while (stack.back().isArtificial) {
+    while (!stack.empty() && stack.back().isArtificial) {
       if (verbose)
         *trace << "Returning from artificial frame\n";
 
