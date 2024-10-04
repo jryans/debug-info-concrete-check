@@ -46,18 +46,33 @@ std::unique_ptr<MemoryBuffer> dwarfBuffer;
 std::unique_ptr<object::Binary> dwarfBinary;
 std::unique_ptr<DWARFContext> dwarfCtx;
 
-// Newest frames are at the end of the stack vector
-std::vector<DWARFDie> stack;
-bool stackDepthChanged = true;
-
 // Initialised to `true` to cover the first instrumented instruction in `main`
-bool lastInstWasCall = true;
+bool lastInstWasCallLike = true;
 QBDI::rword lastCallReturnTarget = 0;
 
 SmallVector<DWARFDie, 4> inlinedChain;
 SmallVector<DWARFDie, 4> lastInlinedChain;
 
 std::optional<std::function<void()>> queuedEvent;
+
+struct StackFrame {
+  StackFrame(DWARFDie entry) : entry(entry) {}
+
+  DWARFDie entry;
+
+  // Marks frames that do not exist on the "native" stack in memory.
+  // During a tail call, the caller's native stack frame becomes the callee's.
+  // In our view of the stack, we retain the caller's frame, mark it
+  // artificial (since it no longer exists natively), and push an additional
+  // frame for the callee.
+  // When a return instruction is encountered, it will pop the current frame and
+  // any adjacent artificial frames (as we must assume they are now gone).
+  bool isArtificial = false;
+};
+
+// Newest frames are at the end of the stack vector
+std::vector<StackFrame> stack;
+bool stackDepthChanged = true;
 
 void pushStackFrame(const DWARFDie &entry) {
   stack.push_back(entry);
@@ -104,6 +119,20 @@ void getInlinedChain(const QBDI::rword &address,
   // Reverse chain so that order matches stack vector
   // Newest frames are now at the end of the vector
   std::reverse(inlinedChain.begin(), inlinedChain.end());
+}
+
+DWARFDie getCallSiteEntry(const DWARFDie &entry, const QBDI::rword &address) {
+  if (!entry.hasChildren())
+    return DWARFDie();
+  for (const auto &callSite : entry.children()) {
+    if (callSite.getTag() != dwarf::Tag::DW_TAG_call_site)
+      continue;
+    if (const auto attrValue = callSite.find(dwarf::DW_AT_call_pc)) {
+      if (attrValue->getAsAddress() == address)
+        return callSite;
+    }
+  }
+  return DWARFDie();
 }
 
 enum struct EventType {
@@ -311,8 +340,8 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
 
   // If last instruction was a call, push a new stack frame using the debug
   // entry inside the callee.
-  if (lastInstWasCall) {
-    lastInstWasCall = false;
+  if (lastInstWasCallLike) {
+    lastInstWasCallLike = false;
     // If the inlined chain is empty (implying no debug info for this address),
     // we still push an (empty) entry to record the stack depth change.
     if (!inlinedChain.empty())
@@ -333,8 +362,25 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
     }
   }
 
-  const bool stackDepthWillChange =
-      instAnalysis->isCall || instAnalysis->isReturn;
+  // Examine branches in case they are actually tail calls
+  bool isTailCall = false;
+  if (instAnalysis->isBranch) {
+    const auto callSite = getCallSiteEntry(inlinedChain.back(), address);
+    if (const auto attrValue = callSite.find(dwarf::DW_AT_call_tail_call)) {
+      // Branch is a tail call
+      isTailCall = true;
+      if (verbose)
+        *trace << "Branch is a tail call\n";
+      // Current frame becomes artificial after tail call
+      stack.back().isArtificial = true;
+    }
+  }
+
+  const bool isCallLike = instAnalysis->isCall || isTailCall;
+  // Our view of stack depth changes even for tail calls.
+  // We preserve tail caller frames as artificial and
+  // push additional frames for the tail callee.
+  const bool stackDepthWillChange = isCallLike || instAnalysis->isReturn;
 
   // In verbose mode, log this instruction, but only if other blocks will not
   if (verbose && !stackDepthWillChange && !stackDepthChanged) {
@@ -384,9 +430,10 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
     }
     size_t stackIdxOldestChainLink = SIZE_T_MAX;
     for (size_t i = stack.size(); i--;) {
+      const auto &entry = stack[i].entry;
       if (verbose)
-        *trace << "stack[" << i << "]: " << stack[i].getShortName() << "\n";
-      if (stack[i] != oldestChainLink)
+        *trace << "stack[" << i << "]: " << entry.getShortName() << "\n";
+      if (entry != oldestChainLink)
         continue;
       stackIdxOldestChainLink = i;
       break;
@@ -401,21 +448,21 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
     if (verbose)
       *trace << "Popping any frames not found\n";
     for (size_t i = stackItemsToCheck; i--;) {
+      const auto &entry = stack[stackIdxOldestChainLink + i].entry;
       if (verbose) {
         *trace << "stack[" << stackIdxOldestChainLink + i << "]: ";
-        *trace << stack[stackIdxOldestChainLink + i].getShortName() << "\n";
+        *trace << entry.getShortName() << "\n";
         *trace << "inlinedChain[" << i << "]: ";
         if (i < newChainSize)
           *trace << inlinedChain[i].getShortName() << "\n";
         else
           *trace << "past end of chain\n";
       }
-      if (i < newChainSize &&
-          stack[stackIdxOldestChainLink + i] == inlinedChain[i]) {
+      if (i < newChainSize && entry == inlinedChain[i]) {
         chainIdxNewestMatchingStack = i;
         break;
       }
-      printReturnFromEventForInlinedEntry(stack.back());
+      printReturnFromEventForInlinedEntry(stack.back().entry);
       popStackFrame();
     }
     // From the alignment block above,
@@ -441,7 +488,7 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
   // Log to trace before stack depth changes (by this instruction)
   if (stackDepthWillChange) {
     const size_t depth = stack.size();
-    if (instAnalysis->isCall) {
+    if (isCallLike) {
       // Queue for (potential) future printing based on next instruction
       queuedEvent = [=]() {
         // Will have access to the _next_ instruction's inlined chain when run
@@ -458,21 +505,46 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
   }
 
   // Update stack depth for next instruction after calls and returns
-  if (instAnalysis->isCall) {
+  if (isCallLike) {
     // Will push stack frame on next instruction
     // (so that we push the debug entry for the callee)
-    lastInstWasCall = true;
+    lastInstWasCallLike = true;
     // Track address to return to so we can compare to stack value on next
     // instrumented instruction to check whether we followed the call. Compute
     // this manually since this callback sees the pre-instruction register
     // state.
-    lastCallReturnTarget = address + instAnalysis->instSize;
+    if (instAnalysis->isCall)
+      lastCallReturnTarget = address + instAnalysis->instSize;
   } else if (instAnalysis->isReturn) {
     // Clear return target when we see an instrumented return
     lastCallReturnTarget = 0;
     // If we're returning from `main`, no need to update stack frames
     if (!lineInfo || lineInfo.FunctionName != "main")
       popStackFrame();
+  }
+
+  // Also return from any artificial frames from past tail calls
+  if (instAnalysis->isReturn) {
+    while (stack.back().isArtificial) {
+      if (verbose)
+        *trace << "Returning from artificial frame\n";
+
+      const auto &entry = stack.back().entry;
+
+      DILineInfo lineInfo;
+      lineInfo.FunctionName = entry.getShortName();
+
+      lineInfo.FileName =
+          entry.getDeclFile(DILineInfoSpecifier::FileLineInfoKind::RawValue);
+      // Source coordinates not generally available when leaving these
+      // artificial frames
+      lineInfo.Line = 0;
+      lineInfo.Column = 0;
+
+      printEventFromLineInfo(lineInfo, EventType::ReturnFrom,
+                             EventSource::Stack);
+      popStackFrame();
+    }
   }
 
   // Add extra line break in verbose mode for readability
