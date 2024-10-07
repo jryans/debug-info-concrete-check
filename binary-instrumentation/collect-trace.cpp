@@ -74,29 +74,6 @@ struct StackFrame {
 std::vector<StackFrame> stack;
 bool stackDepthChanged = true;
 
-void pushStackFrame(const DWARFDie &entry) {
-  stack.push_back(entry);
-  if (verbose)
-    *trace << "push\n";
-  // Only non-inlined entries notify stack depth changes for event printing
-  // Inlined chain processing handles printing all inlined entries when needed
-  if (!entry || entry.isSubprogramDIE())
-    stackDepthChanged = true;
-}
-
-void popStackFrame() {
-  if (!stack.empty()) {
-    stack.pop_back();
-    if (verbose)
-      *trace << "pop\n";
-    // We skip the "return to" event, as this is not expected to map
-    // to the same source location across versions.
-    // stackDepthChanged = true;
-  } else {
-    *trace << "🔔 Ignoring return, stack depth would have wrapped around\n";
-  }
-}
-
 // Defaults to current depth, but non-current depth can also be passed in
 void printStackDepth(const std::optional<size_t> &depth = std::nullopt);
 
@@ -309,6 +286,50 @@ void traceRegisters(QBDI::GPRState *gprState) {
          << format_hex(*((QBDI::rword *)gprState->rsp + 16), 18) << "\n";
 }
 
+void pushStackFrame(const DWARFDie &entry) {
+  stack.push_back(entry);
+  if (verbose)
+    *trace << "push\n";
+  // Only non-inlined entries notify stack depth changes for event printing
+  // Inlined chain processing handles printing all inlined entries when needed
+  if (!entry || entry.isSubprogramDIE())
+    stackDepthChanged = true;
+}
+
+void popStackFrame() {
+  if (!stack.empty()) {
+    stack.pop_back();
+    if (verbose)
+      *trace << "pop\n";
+    // We skip the "return to" event, as this is not expected to map
+    // to the same source location across versions.
+    // stackDepthChanged = true;
+  } else {
+    *trace << "🔔 Ignoring return, stack depth would have wrapped around\n";
+  }
+
+  // Also return from any artificial frames from past tail calls
+  if (!stack.empty() && stack.back().isArtificial) {
+    if (verbose)
+      *trace << "Returning from artificial frame\n";
+
+    const auto &entry = stack.back().entry;
+
+    DILineInfo lineInfo;
+    lineInfo.FunctionName = entry.getShortName();
+
+    lineInfo.FileName =
+        entry.getDeclFile(DILineInfoSpecifier::FileLineInfoKind::RawValue);
+    // Source coordinates not generally available when leaving these
+    // artificial frames
+    lineInfo.Line = 0;
+    lineInfo.Column = 0;
+
+    printEventFromLineInfo(lineInfo, EventType::ReturnFrom, EventSource::Stack);
+    popStackFrame();
+  }
+}
+
 QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
                                  QBDI::GPRState *gprState,
                                  QBDI::FPRState *fprState, void *data) {
@@ -480,6 +501,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
         break;
       }
       printReturnFromEventForInlinedEntry(stack.back().entry);
+      // JRS: Not sure yet if inline-pop should also pop artificial frames...
       popStackFrame();
     }
     // From the alignment block above,
@@ -534,30 +556,6 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     // If we're returning from `main`, no need to update stack frames
     if (!lineInfo || lineInfo.FunctionName != "main")
       popStackFrame();
-  }
-
-  // Also return from any artificial frames from past tail calls
-  if (instAnalysis->isReturn) {
-    while (!stack.empty() && stack.back().isArtificial) {
-      if (verbose)
-        *trace << "Returning from artificial frame\n";
-
-      const auto &entry = stack.back().entry;
-
-      DILineInfo lineInfo;
-      lineInfo.FunctionName = entry.getShortName();
-
-      lineInfo.FileName =
-          entry.getDeclFile(DILineInfoSpecifier::FileLineInfoKind::RawValue);
-      // Source coordinates not generally available when leaving these
-      // artificial frames
-      lineInfo.Line = 0;
-      lineInfo.Column = 0;
-
-      printEventFromLineInfo(lineInfo, EventType::ReturnFrom,
-                             EventSource::Stack);
-      popStackFrame();
-    }
   }
 
   // Add extra line break in verbose mode for readability
