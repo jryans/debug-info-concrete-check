@@ -299,8 +299,19 @@ void printReturnFromEventForInlinedEntry(const DWARFDie &entry) {
                          EventSource::InlinedChain);
 }
 
-QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
-                             QBDI::FPRState *fprState, void *data) {
+void traceRegisters(QBDI::GPRState *gprState) {
+  *trace << "rsp:         " << format_hex(gprState->rsp, 18) << "\n";
+  *trace << "*(rsp):      "
+         << format_hex(*((QBDI::rword *)gprState->rsp + 0), 18) << "\n";
+  *trace << "*(rsp + 8):  "
+         << format_hex(*((QBDI::rword *)gprState->rsp + 8), 18) << "\n";
+  *trace << "*(rsp + 16): "
+         << format_hex(*((QBDI::rword *)gprState->rsp + 16), 18) << "\n";
+}
+
+QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
+                                 QBDI::GPRState *gprState,
+                                 QBDI::FPRState *fprState, void *data) {
   // TODO: Defer analysis when stack depth unchanged
   QBDI::AnalysisType analysisType = QBDI::ANALYSIS_INSTRUCTION;
   if (verbose)
@@ -342,6 +353,10 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
   // entry inside the callee.
   if (lastInstWasCallLike) {
     lastInstWasCallLike = false;
+
+    // TODO: Push stack frame using address called
+    // (to properly report indirect calls to external code)
+
     // If the inlined chain is empty (implying no debug info for this address),
     // we still push an (empty) entry to record the stack depth change.
     if (!inlinedChain.empty())
@@ -357,6 +372,8 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
   // code can call back into instrumented code.
   if (lastCallReturnTarget) {
     if (lastCallReturnTarget == address) {
+      if (verbose)
+        *trace << "Call return target matches\n";
       lastCallReturnTarget = 0;
       popStackFrame();
     }
@@ -509,12 +526,8 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
     // Will push stack frame on next instruction
     // (so that we push the debug entry for the callee)
     lastInstWasCallLike = true;
-    // Track address to return to so we can compare to stack value on next
-    // instrumented instruction to check whether we followed the call. Compute
-    // this manually since this callback sees the pre-instruction register
-    // state.
-    if (instAnalysis->isCall)
-      lastCallReturnTarget = address + instAnalysis->instSize;
+    // See related code in post-instruction hook below which will capture the
+    // call return target
   } else if (instAnalysis->isReturn) {
     // Clear return target when we see an instrumented return
     lastCallReturnTarget = 0;
@@ -550,6 +563,27 @@ QBDI::VMAction onInstruction(QBDI::VMInstanceRef vm, QBDI::GPRState *gprState,
   // Add extra line break in verbose mode for readability
   if (verbose)
     *trace << "\n";
+
+  return QBDI::CONTINUE;
+}
+
+QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
+                                QBDI::GPRState *gprState,
+                                QBDI::FPRState *fprState, void *data) {
+  if (lastInstWasCallLike) {
+    // We will track the address to return to so we can compare to stack value
+    // on next instrumented instruction to check whether we followed the call.
+    // To do this for both regular and tail calls, we need to capture the
+    // post-instruction value at `rsp` after the call-like instruction.
+    lastCallReturnTarget = *((QBDI::rword *)gprState->rsp);
+
+    if (verbose) {
+      *trace << "Last inst. was call-like\n";
+      *trace << "Call return target: " << format_hex(lastCallReturnTarget, 18)
+             << "\n";
+      // traceRegisters(gprState);
+    }
+  }
 
   return QBDI::CONTINUE;
 }
@@ -656,7 +690,8 @@ int qbdipreload_on_run(QBDI::VMInstanceRef vm, QBDI::rword start,
   vm->removeAllInstrumentedRanges();
   vm->addInstrumentedModuleFromAddr((QBDI::rword)mainFunc);
 
-  vm->addCodeCB(QBDI::PREINST, onInstruction, nullptr);
+  vm->addCodeCB(QBDI::PREINST, beforeInstruction, nullptr);
+  vm->addCodeCB(QBDI::POSTINST, afterInstruction, nullptr);
   vm->run(start, stop);
 
   return QBDIPRELOAD_NO_ERROR;
