@@ -37,7 +37,7 @@ bool verbose = false;
 bool printSource = false;
 bool printLocation = true;
 bool printReturnFromLocation = true;
-bool includeExternalLibary = true;
+bool includeExternalLibrary = true;
 bool includeInternalFunction = true;
 
 std::unique_ptr<raw_fd_ostream> trace;
@@ -356,7 +356,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
   // If we're jumping to external code, we may have a queued "call to" event
   // that needs to be checked against our filters before printing
   const bool isBranchToExternal = !lineInfo && instAnalysis->isBranch;
-  if (isBranchToExternal && !includeExternalLibary) {
+  if (isBranchToExternal && !includeExternalLibrary) {
     queuedEvent = std::nullopt;
   }
 
@@ -427,7 +427,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
   }
 
   // Log to trace after stack depth changed (by previous instruction)
-  if (stackDepthChanged && (!isBranchToExternal || includeExternalLibary)) {
+  if (stackDepthChanged && (!isBranchToExternal || includeExternalLibrary)) {
     printEventFromLineInfo(lineInfo, EventType::CallTo, EventSource::Stack,
                            address, instAnalysis->isBranch);
   }
@@ -658,7 +658,7 @@ int qbdipreload_on_main(int argc, char **argv) {
     printReturnFromLocation = false;
   if (std::getenv("CON_TRACE_EXTERNAL_LIBRARY") &&
       !std::strcmp(std::getenv("CON_TRACE_EXTERNAL_LIBRARY"), "0"))
-    includeExternalLibary = false;
+    includeExternalLibrary = false;
   if (std::getenv("CON_TRACE_INTERNAL_FUNCTION") &&
       !std::strcmp(std::getenv("CON_TRACE_INTERNAL_FUNCTION"), "0"))
     includeInternalFunction = false;
