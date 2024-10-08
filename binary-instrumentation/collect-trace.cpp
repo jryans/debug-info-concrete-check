@@ -540,7 +540,9 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     if (isCallLike) {
       // Queue for (potential) future printing based on next instruction
       queuedEvent = [=]() {
-        // Will have access to the _next_ instruction's inlined chain when run
+        // Will have access to the _next_ instruction's inlined chain when run,
+        // which is checked by `isFunctionPrintable` to filter internal function
+        // events if needed
         printEventFromLineInfo(lineInfo, EventType::CallFrom,
                                EventSource::Stack, address,
                                instAnalysis->isBranch, depth);
