@@ -27,6 +27,8 @@
 
 #include "QBDIPreload.h"
 
+#include "trace-debug.h"
+
 using namespace llvm;
 
 namespace {
@@ -277,30 +279,6 @@ void printReturnFromEventForInlinedEntry(const DWARFDie &entry) {
 
   printEventFromLineInfo(lineInfo, EventType::ReturnFrom,
                          EventSource::InlinedChain);
-}
-
-// TODO: Move these trace* helpers to separate file
-
-void traceRegisters(QBDI::GPRState *gprState) {
-  *trace << "rsp:         " << format_hex(gprState->rsp, 18) << "\n";
-  *trace << "*(rsp):      "
-         << format_hex(*((QBDI::rword *)gprState->rsp + 0), 18) << "\n";
-  *trace << "*(rsp + 8):  "
-         << format_hex(*((QBDI::rword *)gprState->rsp + 8), 18) << "\n";
-  *trace << "*(rsp + 16): "
-         << format_hex(*((QBDI::rword *)gprState->rsp + 16), 18) << "\n";
-}
-
-void traceMemoryMaps(const std::vector<QBDI::MemoryMap> &memoryMaps) {
-  for (const auto &mm : memoryMaps) {
-    const auto &name = mm.name.empty() ? "<unnamed>" : mm.name;
-    *trace << name << ": ";
-    (mm.permission & QBDI::PF_READ) ? *trace << "r" : *trace << "_";
-    (mm.permission & QBDI::PF_WRITE) ? *trace << "w" : *trace << "_";
-    (mm.permission & QBDI::PF_EXEC) ? *trace << "x" : *trace << "_";
-    *trace << " [" << format_hex(mm.range.start(), 18) << ", "
-           << format_hex(mm.range.end(), 18) << ")\n";
-  }
 }
 
 bool isAddressInCurrentModule(QBDI::rword address) {
