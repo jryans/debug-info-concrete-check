@@ -46,6 +46,9 @@ std::unique_ptr<MemoryBuffer> dwarfBuffer;
 std::unique_ptr<object::Binary> dwarfBinary;
 std::unique_ptr<DWARFContext> dwarfCtx;
 
+std::vector<QBDI::MemoryMap> currentModuleMemoryMaps;
+
+bool lastInstWasCallOrBranch = false;
 // Initialised to `true` to cover the first instrumented instruction in `main`
 bool lastInstWasCallLike = true;
 QBDI::rword lastCallReturnTarget = 0;
@@ -276,6 +279,8 @@ void printReturnFromEventForInlinedEntry(const DWARFDie &entry) {
                          EventSource::InlinedChain);
 }
 
+// TODO: Move these trace* helpers to separate file
+
 void traceRegisters(QBDI::GPRState *gprState) {
   *trace << "rsp:         " << format_hex(gprState->rsp, 18) << "\n";
   *trace << "*(rsp):      "
@@ -284,6 +289,26 @@ void traceRegisters(QBDI::GPRState *gprState) {
          << format_hex(*((QBDI::rword *)gprState->rsp + 8), 18) << "\n";
   *trace << "*(rsp + 16): "
          << format_hex(*((QBDI::rword *)gprState->rsp + 16), 18) << "\n";
+}
+
+void traceMemoryMaps(const std::vector<QBDI::MemoryMap> &memoryMaps) {
+  for (const auto &mm : memoryMaps) {
+    const auto &name = mm.name.empty() ? "<unnamed>" : mm.name;
+    *trace << name << ": ";
+    (mm.permission & QBDI::PF_READ) ? *trace << "r" : *trace << "_";
+    (mm.permission & QBDI::PF_WRITE) ? *trace << "w" : *trace << "_";
+    (mm.permission & QBDI::PF_EXEC) ? *trace << "x" : *trace << "_";
+    *trace << " [" << format_hex(mm.range.start(), 18) << ", "
+           << format_hex(mm.range.end(), 18) << ")\n";
+  }
+}
+
+bool isAddressInCurrentModule(QBDI::rword address) {
+  for (const auto &mm : currentModuleMemoryMaps) {
+    if (mm.range.contains(address))
+      return true;
+  }
+  return false;
 }
 
 void pushStackFrame(const DWARFDie &entry) {
@@ -353,6 +378,13 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       {address}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
                   DILineInfoSpecifier::FunctionNameKind::ShortName});
 
+  // There are several ways we might move to external code, including:
+  //   - Direct call to current module's jump table, then jump to external code
+  //   - Indirect call to external code
+  //   - Tail call (jump) to external code
+
+  // JRS: Can we improve this so we're not relying on "no debug info" to mean
+  // external code (since that could easily be wrong)...?
   // If we're jumping to external code, we may have a queued "call from" event
   // that needs to be checked against our filters before printing
   const bool isBranchToExternal = !lineInfo && instAnalysis->isBranch;
@@ -543,6 +575,11 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     }
   }
 
+  // For calls and branches, the post-instruction hook checks whether we've
+  // ended up in external code
+  if (instAnalysis->isCall || instAnalysis->isBranch)
+    lastInstWasCallOrBranch = true;
+
   // Update stack depth for next instruction after calls and returns
   if (isCallLike) {
     // Will push stack frame on next instruction
@@ -568,6 +605,19 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
 QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
                                 QBDI::GPRState *gprState,
                                 QBDI::FPRState *fprState, void *data) {
+  if (lastInstWasCallOrBranch) {
+    lastInstWasCallOrBranch = false;
+
+    // Check whether we moved to external code
+    const bool inCurrentModule = isAddressInCurrentModule(gprState->rip);
+    if (!inCurrentModule) {
+      if (verbose) {
+        *trace << "Last inst. moved to external code: "
+               << format_hex(gprState->rip, 18) << "\n";
+      }
+    }
+  }
+
   if (lastInstWasCallLike) {
     // We will track the address to return to so we can compare to stack value
     // on next instrumented instruction to check whether we followed the call.
@@ -680,6 +730,26 @@ int qbdipreload_on_run(QBDI::VMInstanceRef vm, QBDI::rword start,
   if (error) {
     errs() << "Error: Unable to open trace file\n";
     return QBDIPRELOAD_ERR_STARTUP_FAILED;
+  }
+
+  // Save current module memory maps to check for moves into external code
+  const auto processMemoryMaps = QBDI::getCurrentProcessMaps();
+  std::string currentModuleName;
+  for (const auto &mm : processMemoryMaps) {
+    if (!mm.range.contains((QBDI::rword)mainFunc))
+      continue;
+    if (mm.name.empty()) {
+      errs() << "Error: Current module has no name\n";
+      return QBDIPRELOAD_ERR_STARTUP_FAILED;
+    }
+    currentModuleName = mm.name;
+  }
+  for (const auto &mm : processMemoryMaps) {
+    if (!(mm.permission & QBDI::PF_EXEC))
+      continue;
+    if (mm.name != currentModuleName)
+      continue;
+    currentModuleMemoryMaps.push_back(mm);
   }
 
   // Reset instrumented range to include only the main program module.
