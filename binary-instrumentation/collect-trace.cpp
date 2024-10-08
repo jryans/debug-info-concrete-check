@@ -353,7 +353,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       {address}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
                   DILineInfoSpecifier::FunctionNameKind::ShortName});
 
-  // If we're jumping to external code, we may have a queued "call to" event
+  // If we're jumping to external code, we may have a queued "call from" event
   // that needs to be checked against our filters before printing
   const bool isBranchToExternal = !lineInfo && instAnalysis->isBranch;
   if (isBranchToExternal && !includeExternalLibrary) {
