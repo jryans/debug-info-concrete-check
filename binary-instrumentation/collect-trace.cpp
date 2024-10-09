@@ -117,6 +117,14 @@ DWARFDie getCallSiteEntry(const DWARFDie &entry, const QBDI::rword &address) {
   return DWARFDie();
 }
 
+bool isAddressInCurrentModule(QBDI::rword address) {
+  for (const auto &mm : currentModuleMemoryMaps) {
+    if (mm.range.contains(address))
+      return true;
+  }
+  return false;
+}
+
 enum struct EventType {
   CallFrom,
   CallTo,
@@ -211,6 +219,8 @@ void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
   } else {
     if (isBranch && *isBranch)
       *trace << "Jump to external code";
+    else if (address && !isAddressInCurrentModule(*address))
+      *trace << "External code";
     else
       *trace << "🔔 No info for this address";
   }
@@ -279,14 +289,6 @@ void printReturnFromEventForInlinedEntry(const DWARFDie &entry) {
 
   printEventFromLineInfo(lineInfo, EventType::ReturnFrom,
                          EventSource::InlinedChain);
-}
-
-bool isAddressInCurrentModule(QBDI::rword address) {
-  for (const auto &mm : currentModuleMemoryMaps) {
-    if (mm.range.contains(address))
-      return true;
-  }
-  return false;
 }
 
 void pushStackFrame(const DWARFDie &entry) {
