@@ -360,10 +360,10 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       {address}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
                   DILineInfoSpecifier::FunctionNameKind::ShortName});
 
-  // JRS: Can we improve this so we're not relying on "no debug info" to mean
-  // external code (since that could easily be wrong)...?
   // If we're jumping to external code, we may have a queued "call from" event
   // that needs to be checked against our filters before printing
+  // TODO: Check that we're actually in the jump table rather than assuming
+  // that's what happens for all branches without line info.
   const bool isBranchToExternal = !lineInfo && instAnalysis->isBranch;
   if (isBranchToExternal && !includeExternalLibrary) {
     queuedCallFromEvent = std::nullopt;
