@@ -555,14 +555,6 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     }
   }
 
-  // Update stack depth after returns
-  // TODO: Move this to post-instruction hook as well
-  if (currInstIsReturn) {
-    // Clear return target when we see an instrumented return
-    prevCallReturnTarget = 0;
-    popStackFrame();
-  }
-
   return QBDI::CONTINUE;
 }
 
@@ -611,6 +603,14 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
       *trace << "Call return target: " << format_hex(prevCallReturnTarget, 18)
              << "\n";
     }
+  }
+
+  // If the currently analysed instruction is a return,
+  // pop the current stack frame (along with any artificial frames)
+  if (currInstIsReturn) {
+    // Clear return target when we see an instrumented return
+    prevCallReturnTarget = 0;
+    popStackFrame();
   }
 
   // Add extra line break in verbose mode for readability
