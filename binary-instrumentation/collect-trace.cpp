@@ -560,9 +560,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
   if (currInstIsReturn) {
     // Clear return target when we see an instrumented return
     prevCallReturnTarget = 0;
-    // If we're returning from `main`, no need to update stack frames
-    if (!lineInfo || lineInfo.FunctionName != "main")
-      popStackFrame();
+    popStackFrame();
   }
 
   return QBDI::CONTINUE;
