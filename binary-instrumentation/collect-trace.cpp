@@ -64,9 +64,26 @@ QBDI::rword prevCallReturnTarget = 0;
 SmallVector<DWARFDie, 4> inlinedChain;
 SmallVector<DWARFDie, 4> prevInlinedChain;
 
-// We don't commit to "call from" events until the post-instruction step,
-// so we queue them here for potential printing.
+// We don't commit to "call from" / "call to" events until we have analysis
+// for the next instruction, so we queue them here for potential printing.
 std::optional<std::function<void()>> queuedCallFromEvent;
+std::optional<std::function<void()>> queuedCallToEvent;
+
+void dropQueue() {
+  queuedCallFromEvent = std::nullopt;
+  queuedCallToEvent = std::nullopt;
+}
+
+void printQueue() {
+  if (queuedCallFromEvent) {
+    (*queuedCallFromEvent)();
+    queuedCallFromEvent = std::nullopt;
+  }
+  if (queuedCallToEvent) {
+    (*queuedCallToEvent)();
+    queuedCallToEvent = std::nullopt;
+  }
+}
 
 struct StackFrame {
   StackFrame(DWARFDie entry) : entry(entry) {}
@@ -199,13 +216,13 @@ void printEventFromLineInfo(
     const DILineInfo &lineInfo, const EventType &type,
     const EventSource &source,
     const std::optional<QBDI::rword> &address = std::nullopt,
-    const std::optional<bool> &isBranch = std::nullopt,
+    const std::optional<QBDI::VMInstanceRef> &vm = std::nullopt,
     const std::optional<size_t> &depth = std::nullopt);
 
 void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
                             const EventSource &source,
                             const std::optional<QBDI::rword> &address,
-                            const std::optional<bool> &isBranch,
+                            const std::optional<QBDI::VMInstanceRef> &vm,
                             const std::optional<size_t> &depth) {
   if (!isFunctionPrintable())
     return;
@@ -225,7 +242,8 @@ void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
     if (isLocationPrintable(type))
       *trace << ":" << lineInfo.Line << ":" << lineInfo.Column;
   } else {
-    if (isBranch && *isBranch)
+    if (address && vm && (*vm)->getCachedInstAnalysis(*address) &&
+        (*vm)->getCachedInstAnalysis(*address)->isBranch)
       *trace << "Jump to external code";
     else if (address && !isAddressInCurrentModule(*address))
       *trace << "External code";
@@ -374,6 +392,18 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       {address}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
                   DILineInfoSpecifier::FunctionNameKind::ShortName});
 
+  // If we're jumping to external code, we may have queued events
+  // that need to be checked against our filters before printing
+  // TODO: Check that we're actually in the jump table rather than assuming
+  // that's what happens for all branches without line info.
+  const bool isBranchToExternal = !lineInfo && currInstIsBranch;
+  if (isBranchToExternal && !includeExternalLibrary) {
+    dropQueue();
+  }
+
+  // If there are queued events, print them now
+  printQueue();
+
   // Get the inlined chain for this address
   inlinedChain.clear();
   getInlinedChain(address, inlinedChain);
@@ -515,21 +545,19 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
         // which is checked by `isFunctionPrintable` to filter internal function
         // events if needed
         printEventFromLineInfo(lineInfo, EventType::CallFrom,
-                               EventSource::Stack, address, currInstIsBranch,
-                               depth);
+                               EventSource::Stack, address, vm, depth);
       };
     } else {
       // Print immediately
       printEventFromLineInfo(lineInfo, EventType::ReturnFrom,
-                             EventSource::Stack, address, currInstIsBranch,
-                             depth);
+                             EventSource::Stack, address, vm, depth);
     }
   }
 
   // In verbose mode, log current instruction, but only if other blocks will not
   if (verbose && !stackDepthWillChange) {
     printEventFromLineInfo(lineInfo, EventType::Verbose, EventSource::Verbose,
-                           address, currInstIsBranch);
+                           address, vm);
   }
 
   return QBDI::CONTINUE;
@@ -557,24 +585,6 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
                << format_hex(gprState->rip, 18) << "\n";
       }
     }
-  }
-
-  // If we're jumping to external code, we may have a queued "call from" event
-  // that needs to be checked against our filters before printing
-  // TODO: Check that we're actually in the jump table rather than assuming
-  // that's what happens for all branches without line info.
-  // JRS: This is really trying to check _next_ inst!
-  // Maybe queue "call to" as well, then move this back to pre
-  // Or... work out how to find the jump table!
-  // nextInstIsBranchToExternal = !nextLineInfo && nextInstIsBranch;
-  // if (nextInstIsBranchToExternal && !includeExternalLibrary) {
-  //   queuedCallFromEvent = std::nullopt;
-  // }
-
-  // If there's a queued "call from" event, print that now
-  if (queuedCallFromEvent) {
-    (*queuedCallFromEvent)();
-    queuedCallFromEvent = std::nullopt;
   }
 
   // If the currently analysed instruction is call-like,
@@ -607,12 +617,13 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
   }
 
   // Log next instruction after stack depth changed
-  // JRS: Here we'd need "next inst is branch" to filter correctly
-  if (stackDepthChanged
-      // && (!nextInstIsBranchToExternal || includeExternalLibrary)
-  ) {
-    printEventFromLineInfo(nextLineInfo, EventType::CallTo, EventSource::Stack,
-                           nextAddress /*, nextInstIsBranch */);
+  if (stackDepthChanged) {
+    const size_t depth = stack.size();
+    // Queue for (potential) future printing based on next instruction
+    queuedCallToEvent = [=]() {
+      printEventFromLineInfo(nextLineInfo, EventType::CallTo,
+                             EventSource::Stack, nextAddress, vm, depth);
+    };
   }
 
   // Reset did change tracker
