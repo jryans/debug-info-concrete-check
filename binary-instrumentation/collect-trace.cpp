@@ -58,8 +58,7 @@ std::vector<QBDI::MemoryMap> currentModuleMemoryMaps;
 // Signals post-instruction hook to check for movement to external library
 bool currInstIsCallOrBranch = false;
 
-// Initialised to `true` to cover the first instrumented instruction in `main`
-bool currInstIsCallLike = true;
+bool currInstIsCallLike = false;
 QBDI::rword prevCallReturnTarget = 0;
 
 SmallVector<DWARFDie, 4> inlinedChain;
@@ -86,7 +85,7 @@ struct StackFrame {
 
 // Newest frames are at the end of the stack vector
 std::vector<StackFrame> stack;
-bool stackDepthChanged = true;
+bool stackDepthChanged = false;
 
 // Defaults to current depth, but non-current depth can also be passed in
 void printStackDepth(const std::optional<size_t> &depth = std::nullopt);
@@ -386,23 +385,6 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     queuedCallFromEvent = std::nullopt;
   }
 
-  // If previous instruction was a call, push a new stack frame using the debug
-  // entry inside the callee.
-  // JRS: Move this to the post-instruction hook
-  if (currInstIsCallLike) {
-    currInstIsCallLike = false;
-
-    // TODO: Push stack frame using address called
-    // (to properly report indirect calls to external code)
-
-    // If the inlined chain is empty (implying no debug info for this address),
-    // we still push an (empty) entry to record the stack depth change.
-    if (!inlinedChain.empty())
-      pushStackFrame(inlinedChain.back());
-    else
-      pushStackFrame(DWARFDie());
-  }
-
   // If previous instrumented instruction was a call, check whether this next
   // instrumented instruction was the call's return target. If yes, it means we
   // just returned from uninstrumented code and need to adjust stack depth.
@@ -569,11 +551,9 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
 
   // Update stack depth for next instruction after calls and returns
   if (isCallLike) {
-    // Will push stack frame on next instruction
+    // Will push stack frame in post-instruction hook
     // (so that we push the debug entry for the callee)
     currInstIsCallLike = true;
-    // See related code in post-instruction hook below which will capture the
-    // call return target
   } else if (instAnalysis->isReturn) {
     // Clear return target when we see an instrumented return
     prevCallReturnTarget = 0;
@@ -590,6 +570,8 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
                                 QBDI::FPRState *fprState, void *data) {
   const auto &nextAddress = gprState->rip;
 
+  // If the currently analysed instruction is a call or branch,
+  // use the next instruction's address to check if we moved to external code
   if (currInstIsCallOrBranch) {
     currInstIsCallOrBranch = false;
 
@@ -603,7 +585,24 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
     }
   }
 
+  // If the currently analysed instruction is call-like,
+  // push a new stack frame using the debug entry inside the callee
   if (currInstIsCallLike) {
+    currInstIsCallLike = false;
+
+    // Get the inlined chain for the next instruction for local use in this hook
+    // only. We do not store this in global state, as that's meant to track the
+    // current module only.
+    SmallVector<DWARFDie, 4> nextInlinedChain;
+    getInlinedChain(nextAddress, nextInlinedChain);
+
+    // If the inlined chain is empty (implying no debug info for this address),
+    // we still push an (empty) entry to record the stack depth change.
+    if (!nextInlinedChain.empty())
+      pushStackFrame(nextInlinedChain.back());
+    else
+      pushStackFrame(DWARFDie());
+
     // We will track the address to return to so we can compare to stack value
     // on next instrumented instruction to check whether we followed the call.
     // To do this for both regular and tail calls, we need to capture the
@@ -614,7 +613,6 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
       *trace << "Inst. was call-like\n";
       *trace << "Call return target: " << format_hex(prevCallReturnTarget, 18)
              << "\n";
-      // traceRegisters(gprState);
     }
   }
 
@@ -749,6 +747,12 @@ int qbdipreload_on_run(QBDI::VMInstanceRef vm, QBDI::rword start,
 
   vm->addCodeCB(QBDI::PREINST, beforeInstruction, nullptr);
   vm->addCodeCB(QBDI::POSTINST, afterInstruction, nullptr);
+
+  // Initialise stack with frame for `main`
+  getInlinedChain((QBDI::rword)mainFunc, inlinedChain);
+  assert(!inlinedChain.empty());
+  pushStackFrame(inlinedChain.back());
+
   vm->run(start, stop);
 
   return QBDIPRELOAD_NO_ERROR;
