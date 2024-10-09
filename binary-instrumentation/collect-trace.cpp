@@ -58,7 +58,9 @@ QBDI::rword lastCallReturnTarget = 0;
 SmallVector<DWARFDie, 4> inlinedChain;
 SmallVector<DWARFDie, 4> lastInlinedChain;
 
-std::optional<std::function<void()>> queuedEvent;
+// We don't commit to "call from" events until the post-instruction step,
+// so we queue them here for potential printing.
+std::optional<std::function<void()>> queuedCallFromEvent;
 
 struct StackFrame {
   StackFrame(DWARFDie entry) : entry(entry) {}
@@ -364,17 +366,17 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
   // that needs to be checked against our filters before printing
   const bool isBranchToExternal = !lineInfo && instAnalysis->isBranch;
   if (isBranchToExternal && !includeExternalLibrary) {
-    queuedEvent = std::nullopt;
+    queuedCallFromEvent = std::nullopt;
   }
 
   // Get the inlined chain for this address
   inlinedChain.clear();
   getInlinedChain(address, inlinedChain);
 
-  // If there's an event queued, print that now
-  if (queuedEvent) {
-    (*queuedEvent)();
-    queuedEvent = std::nullopt;
+  // If there's a queued "call from" event, print that now
+  if (queuedCallFromEvent) {
+    (*queuedCallFromEvent)();
+    queuedCallFromEvent = std::nullopt;
   }
 
   // If last instruction was a call, push a new stack frame using the debug
@@ -536,7 +538,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     const size_t depth = stack.size();
     if (isCallLike) {
       // Queue for (potential) future printing based on next instruction
-      queuedEvent = [=]() {
+      queuedCallFromEvent = [=]() {
         // Will have access to the _next_ instruction's inlined chain when run,
         // which is checked by `isFunctionPrintable` to filter internal function
         // events if needed
