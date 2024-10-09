@@ -55,10 +55,11 @@ std::vector<QBDI::MemoryMap> currentModuleMemoryMaps;
 // State prefixed with `curr` is passed from pre-instruction hook
 // to post-instruction hook.
 
-// Signals post-instruction hook to check for movement to external library
-bool currInstIsCallOrBranch = false;
-
+bool currInstIsCall = false;
 bool currInstIsCallLike = false;
+bool currInstIsBranch = false;
+bool currInstIsBranchToExternal = false;
+bool currInstIsReturn = false;
 QBDI::rword prevCallReturnTarget = 0;
 
 SmallVector<DWARFDie, 4> inlinedChain;
@@ -353,6 +354,12 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
   const QBDI::InstAnalysis *instAnalysis = vm->getInstAnalysis(analysisType);
   const auto &address = instAnalysis->address;
 
+  // Save bits of current instruction analysis that may be of use
+  // in the post-instruction hook as well
+  currInstIsCall = instAnalysis->isCall;
+  currInstIsBranch = instAnalysis->isBranch;
+  currInstIsReturn = instAnalysis->isReturn;
+
   // Print address and disassembly in verbose mode for trace debugging
   if (verbose) {
     // 16 hex digits for 64-bit address plus 2 character prefix
@@ -370,8 +377,8 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
   // that needs to be checked against our filters before printing
   // TODO: Check that we're actually in the jump table rather than assuming
   // that's what happens for all branches without line info.
-  const bool isBranchToExternal = !lineInfo && instAnalysis->isBranch;
-  if (isBranchToExternal && !includeExternalLibrary) {
+  currInstIsBranchToExternal = !lineInfo && currInstIsBranch;
+  if (currInstIsBranchToExternal && !includeExternalLibrary) {
     queuedCallFromEvent = std::nullopt;
   }
 
@@ -401,7 +408,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
 
   // Examine branches in case they are actually tail calls
   bool isTailCall = false;
-  if (instAnalysis->isBranch && !inlinedChain.empty()) {
+  if (currInstIsBranch && !inlinedChain.empty()) {
     const auto callSite = getCallSiteEntry(inlinedChain.back(), address);
     if (const auto attrValue = callSite.find(dwarf::DW_AT_call_tail_call)) {
       // Branch is a tail call
@@ -413,22 +420,26 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     }
   }
 
-  const bool isCallLike = instAnalysis->isCall || isTailCall;
+  // For call-like instructions, we push stack frame in post-instruction hook
+  // (so that we push the debug entry for the callee)
+  currInstIsCallLike = currInstIsCall || isTailCall;
   // Our view of stack depth changes even for tail calls.
   // We preserve tail caller frames as artificial and
   // push additional frames for the tail callee.
-  const bool stackDepthWillChange = isCallLike || instAnalysis->isReturn;
+  const bool stackDepthWillChange = currInstIsCallLike || currInstIsReturn;
 
   // In verbose mode, log this instruction, but only if other blocks will not
+  // JRS: Use previous logged address to check whether to log here...?
   if (verbose && !stackDepthWillChange && !stackDepthChanged) {
     printEventFromLineInfo(lineInfo, EventType::Verbose, EventSource::Verbose,
-                           address, instAnalysis->isBranch);
+                           address, currInstIsBranch);
   }
 
   // Log to trace after stack depth changed (by previous instruction)
-  if (stackDepthChanged && (!isBranchToExternal || includeExternalLibrary)) {
+  if (stackDepthChanged &&
+      (!currInstIsBranchToExternal || includeExternalLibrary)) {
     printEventFromLineInfo(lineInfo, EventType::CallTo, EventSource::Stack,
-                           address, instAnalysis->isBranch);
+                           address, currInstIsBranch);
   }
 
   // Reset did change tracker
@@ -526,35 +537,27 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
   // Log to trace before stack depth changes (by this instruction)
   if (stackDepthWillChange) {
     const size_t depth = stack.size();
-    if (isCallLike) {
+    if (currInstIsCallLike) {
       // Queue for (potential) future printing based on next instruction
       queuedCallFromEvent = [=]() {
         // Will have access to the _next_ instruction's inlined chain when run,
         // which is checked by `isFunctionPrintable` to filter internal function
         // events if needed
         printEventFromLineInfo(lineInfo, EventType::CallFrom,
-                               EventSource::Stack, address,
-                               instAnalysis->isBranch, depth);
+                               EventSource::Stack, address, currInstIsBranch,
+                               depth);
       };
     } else {
       // Print immediately
       printEventFromLineInfo(lineInfo, EventType::ReturnFrom,
-                             EventSource::Stack, address,
-                             instAnalysis->isBranch, depth);
+                             EventSource::Stack, address, currInstIsBranch,
+                             depth);
     }
   }
 
-  // For calls and branches, the post-instruction hook checks whether we've
-  // ended up in external code
-  if (instAnalysis->isCall || instAnalysis->isBranch)
-    currInstIsCallOrBranch = true;
-
-  // Update stack depth for next instruction after calls and returns
-  if (isCallLike) {
-    // Will push stack frame in post-instruction hook
-    // (so that we push the debug entry for the callee)
-    currInstIsCallLike = true;
-  } else if (instAnalysis->isReturn) {
+  // Update stack depth after returns
+  // TODO: Move this to post-instruction hook as well
+  if (currInstIsReturn) {
     // Clear return target when we see an instrumented return
     prevCallReturnTarget = 0;
     // If we're returning from `main`, no need to update stack frames
@@ -572,9 +575,7 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
 
   // If the currently analysed instruction is a call or branch,
   // use the next instruction's address to check if we moved to external code
-  if (currInstIsCallOrBranch) {
-    currInstIsCallOrBranch = false;
-
+  if (currInstIsCall || currInstIsBranch) {
     // Check whether we moved to external code
     const bool inCurrentModule = isAddressInCurrentModule(nextAddress);
     if (!inCurrentModule) {
@@ -588,8 +589,6 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
   // If the currently analysed instruction is call-like,
   // push a new stack frame using the debug entry inside the callee
   if (currInstIsCallLike) {
-    currInstIsCallLike = false;
-
     // Get the inlined chain for the next instruction for local use in this hook
     // only. We do not store this in global state, as that's meant to track the
     // current module only.
