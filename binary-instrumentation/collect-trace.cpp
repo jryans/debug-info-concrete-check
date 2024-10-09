@@ -33,7 +33,7 @@ using namespace llvm;
 
 namespace {
 
-void *mainFunc;
+QBDI::rword mainFunc;
 
 bool verbose = false;
 bool printSource = false;
@@ -669,7 +669,7 @@ extern "C" {
 QBDIPRELOAD_INIT;
 
 int qbdipreload_on_start(void *main) {
-  mainFunc = main;
+  mainFunc = (QBDI::rword)main;
   // Leave this as "not handled" so the default handler will still run,
   // which hooks the `main` function.
   return QBDIPRELOAD_NOT_HANDLED;
@@ -720,7 +720,7 @@ int qbdipreload_on_run(QBDI::VMInstanceRef vm, QBDI::rword start,
   const auto processMemoryMaps = QBDI::getCurrentProcessMaps();
   std::string currentModuleName;
   for (const auto &mm : processMemoryMaps) {
-    if (!mm.range.contains((QBDI::rword)mainFunc))
+    if (!mm.range.contains(mainFunc))
       continue;
     if (mm.name.empty()) {
       errs() << "Error: Current module has no name\n";
@@ -740,13 +740,13 @@ int qbdipreload_on_run(QBDI::VMInstanceRef vm, QBDI::rword start,
   // This ensures we avoid the dynamic loader and libraries.
   // The dynamic loader seems to confuse stack depth detection.
   vm->removeAllInstrumentedRanges();
-  vm->addInstrumentedModuleFromAddr((QBDI::rword)mainFunc);
+  vm->addInstrumentedModuleFromAddr(mainFunc);
 
   vm->addCodeCB(QBDI::PREINST, beforeInstruction, nullptr);
   vm->addCodeCB(QBDI::POSTINST, afterInstruction, nullptr);
 
   // Initialise stack with frame for `main`
-  getInlinedChain((QBDI::rword)mainFunc, inlinedChain);
+  getInlinedChain(mainFunc, inlinedChain);
   assert(!inlinedChain.empty());
   pushStackFrame(inlinedChain.back());
 
