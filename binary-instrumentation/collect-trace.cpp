@@ -50,13 +50,20 @@ std::unique_ptr<DWARFContext> dwarfCtx;
 
 std::vector<QBDI::MemoryMap> currentModuleMemoryMaps;
 
-bool lastInstWasCallOrBranch = false;
+// State prefixed with `prev` is passed from previous instruction
+// to hooks for next instruction.
+// State prefixed with `curr` is passed from pre-instruction hook
+// to post-instruction hook.
+
+// Signals post-instruction hook to check for movement to external library
+bool currInstIsCallOrBranch = false;
+
 // Initialised to `true` to cover the first instrumented instruction in `main`
-bool lastInstWasCallLike = true;
-QBDI::rword lastCallReturnTarget = 0;
+bool currInstIsCallLike = true;
+QBDI::rword prevCallReturnTarget = 0;
 
 SmallVector<DWARFDie, 4> inlinedChain;
-SmallVector<DWARFDie, 4> lastInlinedChain;
+SmallVector<DWARFDie, 4> prevInlinedChain;
 
 // We don't commit to "call from" events until the post-instruction step,
 // so we queue them here for potential printing.
@@ -379,10 +386,11 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     queuedCallFromEvent = std::nullopt;
   }
 
-  // If last instruction was a call, push a new stack frame using the debug
+  // If previous instruction was a call, push a new stack frame using the debug
   // entry inside the callee.
-  if (lastInstWasCallLike) {
-    lastInstWasCallLike = false;
+  // JRS: Move this to the post-instruction hook
+  if (currInstIsCallLike) {
+    currInstIsCallLike = false;
 
     // TODO: Push stack frame using address called
     // (to properly report indirect calls to external code)
@@ -395,16 +403,16 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       pushStackFrame(DWARFDie());
   }
 
-  // If last instrumented instruction was a call, check whether this next
+  // If previous instrumented instruction was a call, check whether this next
   // instrumented instruction was the call's return target. If yes, it means we
   // just returned from uninstrumented code and need to adjust stack depth.
   // TODO: May need to track the full stack of addresses in case uninstrumented
   // code can call back into instrumented code.
-  if (lastCallReturnTarget) {
-    if (lastCallReturnTarget == address) {
+  if (prevCallReturnTarget) {
+    if (prevCallReturnTarget == address) {
       if (verbose)
         *trace << "Call return target matches\n";
-      lastCallReturnTarget = 0;
+      prevCallReturnTarget = 0;
       popStackFrame();
     }
   }
@@ -444,7 +452,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
   // Reset did change tracker
   stackDepthChanged = false;
 
-  // Compare inlined chain for this address to last chain
+  // Compare inlined chain for this address to previous chain
   // TODO: Adjust this logic for multiple active inlined chains
   if (verbose) {
     *trace << "Inlined chain:\n";
@@ -452,15 +460,15 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       *trace << entry.getShortName() << "\n";
     }
   }
-  if (!inlinedChain.empty() && lastInlinedChain != inlinedChain) {
-    // Inlined chain has changed since last instruction
+  if (!inlinedChain.empty() && prevInlinedChain != inlinedChain) {
+    // Inlined chain has changed since previous instruction
     // Adjust stack frames to match change in inline details
     // JRS: There's some partial overlap with the non-inlined push / pops...
     if (verbose)
       *trace << "Inlined chain changed!\n";
     // Both the stack and inlined chain vectors are sorted
     // with newest frames at the end of the vector.
-    const size_t oldChainSize = lastInlinedChain.size();
+    const size_t oldChainSize = prevInlinedChain.size();
     const size_t newChainSize = inlinedChain.size();
     if (verbose) {
       *trace << "Old chain: " << oldChainSize << "\n";
@@ -530,7 +538,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     }
 
     // Store chain to check for changes with next instruction
-    lastInlinedChain = inlinedChain;
+    prevInlinedChain = inlinedChain;
   }
 
   // Log to trace before stack depth changes (by this instruction)
@@ -557,18 +565,18 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
   // For calls and branches, the post-instruction hook checks whether we've
   // ended up in external code
   if (instAnalysis->isCall || instAnalysis->isBranch)
-    lastInstWasCallOrBranch = true;
+    currInstIsCallOrBranch = true;
 
   // Update stack depth for next instruction after calls and returns
   if (isCallLike) {
     // Will push stack frame on next instruction
     // (so that we push the debug entry for the callee)
-    lastInstWasCallLike = true;
+    currInstIsCallLike = true;
     // See related code in post-instruction hook below which will capture the
     // call return target
   } else if (instAnalysis->isReturn) {
     // Clear return target when we see an instrumented return
-    lastCallReturnTarget = 0;
+    prevCallReturnTarget = 0;
     // If we're returning from `main`, no need to update stack frames
     if (!lineInfo || lineInfo.FunctionName != "main")
       popStackFrame();
@@ -580,29 +588,31 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
 QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
                                 QBDI::GPRState *gprState,
                                 QBDI::FPRState *fprState, void *data) {
-  if (lastInstWasCallOrBranch) {
-    lastInstWasCallOrBranch = false;
+  const auto &nextAddress = gprState->rip;
+
+  if (currInstIsCallOrBranch) {
+    currInstIsCallOrBranch = false;
 
     // Check whether we moved to external code
-    const bool inCurrentModule = isAddressInCurrentModule(gprState->rip);
+    const bool inCurrentModule = isAddressInCurrentModule(nextAddress);
     if (!inCurrentModule) {
       if (verbose) {
-        *trace << "Last inst. moved to external code: "
+        *trace << "Inst. moved to external code: "
                << format_hex(gprState->rip, 18) << "\n";
       }
     }
   }
 
-  if (lastInstWasCallLike) {
+  if (currInstIsCallLike) {
     // We will track the address to return to so we can compare to stack value
     // on next instrumented instruction to check whether we followed the call.
     // To do this for both regular and tail calls, we need to capture the
     // post-instruction value at `rsp` after the call-like instruction.
-    lastCallReturnTarget = *((QBDI::rword *)gprState->rsp);
+    prevCallReturnTarget = *((QBDI::rword *)gprState->rsp);
 
     if (verbose) {
-      *trace << "Last inst. was call-like\n";
-      *trace << "Call return target: " << format_hex(lastCallReturnTarget, 18)
+      *trace << "Inst. was call-like\n";
+      *trace << "Call return target: " << format_hex(prevCallReturnTarget, 18)
              << "\n";
       // traceRegisters(gprState);
     }
