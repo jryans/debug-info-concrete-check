@@ -58,7 +58,6 @@ std::vector<QBDI::MemoryMap> currentModuleMemoryMaps;
 bool currInstIsCall = false;
 bool currInstIsCallLike = false;
 bool currInstIsBranch = false;
-bool currInstIsBranchToExternal = false;
 bool currInstIsReturn = false;
 QBDI::rword prevCallReturnTarget = 0;
 
@@ -356,6 +355,8 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
 
   // Save bits of current instruction analysis that may be of use
   // in the post-instruction hook as well
+  // JRS: We can still access instruction analysis for the current instruction
+  // in the post-instruction hook. Should we do that instead of shared state...?
   currInstIsCall = instAnalysis->isCall;
   currInstIsBranch = instAnalysis->isBranch;
   currInstIsReturn = instAnalysis->isReturn;
@@ -373,24 +374,9 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       {address}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
                   DILineInfoSpecifier::FunctionNameKind::ShortName});
 
-  // If we're jumping to external code, we may have a queued "call from" event
-  // that needs to be checked against our filters before printing
-  // TODO: Check that we're actually in the jump table rather than assuming
-  // that's what happens for all branches without line info.
-  currInstIsBranchToExternal = !lineInfo && currInstIsBranch;
-  if (currInstIsBranchToExternal && !includeExternalLibrary) {
-    queuedCallFromEvent = std::nullopt;
-  }
-
   // Get the inlined chain for this address
   inlinedChain.clear();
   getInlinedChain(address, inlinedChain);
-
-  // If there's a queued "call from" event, print that now
-  if (queuedCallFromEvent) {
-    (*queuedCallFromEvent)();
-    queuedCallFromEvent = std::nullopt;
-  }
 
   // If previous instrumented instruction was a call, check whether this next
   // instrumented instruction was the call's return target. If yes, it means we
@@ -405,45 +391,6 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       popStackFrame();
     }
   }
-
-  // Examine branches in case they are actually tail calls
-  bool isTailCall = false;
-  if (currInstIsBranch && !inlinedChain.empty()) {
-    const auto callSite = getCallSiteEntry(inlinedChain.back(), address);
-    if (const auto attrValue = callSite.find(dwarf::DW_AT_call_tail_call)) {
-      // Branch is a tail call
-      isTailCall = true;
-      if (verbose)
-        *trace << "Branch is a tail call\n";
-      // Current frame becomes artificial after tail call
-      stack.back().isArtificial = true;
-    }
-  }
-
-  // For call-like instructions, we push stack frame in post-instruction hook
-  // (so that we push the debug entry for the callee)
-  currInstIsCallLike = currInstIsCall || isTailCall;
-  // Our view of stack depth changes even for tail calls.
-  // We preserve tail caller frames as artificial and
-  // push additional frames for the tail callee.
-  const bool stackDepthWillChange = currInstIsCallLike || currInstIsReturn;
-
-  // In verbose mode, log this instruction, but only if other blocks will not
-  // JRS: Use previous logged address to check whether to log here...?
-  if (verbose && !stackDepthWillChange && !stackDepthChanged) {
-    printEventFromLineInfo(lineInfo, EventType::Verbose, EventSource::Verbose,
-                           address, currInstIsBranch);
-  }
-
-  // Log to trace after stack depth changed (by previous instruction)
-  if (stackDepthChanged &&
-      (!currInstIsBranchToExternal || includeExternalLibrary)) {
-    printEventFromLineInfo(lineInfo, EventType::CallTo, EventSource::Stack,
-                           address, currInstIsBranch);
-  }
-
-  // Reset did change tracker
-  stackDepthChanged = false;
 
   // Compare inlined chain for this address to previous chain
   // TODO: Adjust this logic for multiple active inlined chains
@@ -534,7 +481,31 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     prevInlinedChain = inlinedChain;
   }
 
+  // Examine branches in case they are actually tail calls
+  bool isTailCall = false;
+  if (currInstIsBranch && !inlinedChain.empty()) {
+    const auto callSite = getCallSiteEntry(inlinedChain.back(), address);
+    if (const auto attrValue = callSite.find(dwarf::DW_AT_call_tail_call)) {
+      // Branch is a tail call
+      isTailCall = true;
+      if (verbose)
+        *trace << "Branch is a tail call\n";
+      // Current frame becomes artificial after tail call
+      stack.back().isArtificial = true;
+    }
+  }
+
+  // For call-like instructions, we push stack frame in post-instruction hook
+  // (so that we push the debug entry for the callee)
+  currInstIsCallLike = currInstIsCall || isTailCall;
+  // Our view of stack depth changes even for tail calls.
+  // We preserve tail caller frames as artificial and
+  // push additional frames for the tail callee.
+  const bool stackDepthWillChange = currInstIsCallLike || currInstIsReturn;
+
   // Log to trace before stack depth changes (by this instruction)
+  // JRS: Perhaps always queue "call from" for call and branches,
+  // then remove in post if it didn't happen...?
   if (stackDepthWillChange) {
     const size_t depth = stack.size();
     if (currInstIsCallLike) {
@@ -555,6 +526,12 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     }
   }
 
+  // In verbose mode, log current instruction, but only if other blocks will not
+  if (verbose && !stackDepthWillChange) {
+    printEventFromLineInfo(lineInfo, EventType::Verbose, EventSource::Verbose,
+                           address, currInstIsBranch);
+  }
+
   return QBDI::CONTINUE;
 }
 
@@ -562,6 +539,12 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
                                 QBDI::GPRState *gprState,
                                 QBDI::FPRState *fprState, void *data) {
   const auto &nextAddress = gprState->rip;
+
+  // Look for function name and line info related to this address
+  // JRS: Remove this and use only the inlined chain...?
+  const auto nextLineInfo = dwarfCtx->getLineInfoForAddress(
+      {nextAddress}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
+                      DILineInfoSpecifier::FunctionNameKind::ShortName});
 
   // If the currently analysed instruction is a call or branch,
   // use the next instruction's address to check if we moved to external code
@@ -574,6 +557,24 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
                << format_hex(gprState->rip, 18) << "\n";
       }
     }
+  }
+
+  // If we're jumping to external code, we may have a queued "call from" event
+  // that needs to be checked against our filters before printing
+  // TODO: Check that we're actually in the jump table rather than assuming
+  // that's what happens for all branches without line info.
+  // JRS: This is really trying to check _next_ inst!
+  // Maybe queue "call to" as well, then move this back to pre
+  // Or... work out how to find the jump table!
+  // nextInstIsBranchToExternal = !nextLineInfo && nextInstIsBranch;
+  // if (nextInstIsBranchToExternal && !includeExternalLibrary) {
+  //   queuedCallFromEvent = std::nullopt;
+  // }
+
+  // If there's a queued "call from" event, print that now
+  if (queuedCallFromEvent) {
+    (*queuedCallFromEvent)();
+    queuedCallFromEvent = std::nullopt;
   }
 
   // If the currently analysed instruction is call-like,
@@ -604,6 +605,18 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
              << "\n";
     }
   }
+
+  // Log next instruction after stack depth changed
+  // JRS: Here we'd need "next inst is branch" to filter correctly
+  if (stackDepthChanged
+      // && (!nextInstIsBranchToExternal || includeExternalLibrary)
+  ) {
+    printEventFromLineInfo(nextLineInfo, EventType::CallTo, EventSource::Stack,
+                           nextAddress /*, nextInstIsBranch */);
+  }
+
+  // Reset did change tracker
+  stackDepthChanged = false;
 
   // If the currently analysed instruction is a return,
   // pop the current stack frame (along with any artificial frames)
@@ -749,6 +762,14 @@ int qbdipreload_on_run(QBDI::VMInstanceRef vm, QBDI::rword start,
   getInlinedChain(mainFunc, inlinedChain);
   assert(!inlinedChain.empty());
   pushStackFrame(inlinedChain.back());
+
+  // Log initial instruction
+  const auto lineInfo = dwarfCtx->getLineInfoForAddress(
+      {mainFunc}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
+                   DILineInfoSpecifier::FunctionNameKind::ShortName});
+  printEventFromLineInfo(lineInfo, EventType::CallTo, EventSource::Stack,
+                         mainFunc);
+  stackDepthChanged = false;
 
   vm->run(start, stop);
 
