@@ -356,11 +356,6 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       {address}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
                   DILineInfoSpecifier::FunctionNameKind::ShortName});
 
-  // There are several ways we might move to external code, including:
-  //   - Direct call to current module's jump table, then jump to external code
-  //   - Indirect call to external code
-  //   - Tail call (jump) to external code
-
   // JRS: Can we improve this so we're not relying on "no debug info" to mean
   // external code (since that could easily be wrong)...?
   // If we're jumping to external code, we may have a queued "call from" event
