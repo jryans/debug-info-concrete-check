@@ -351,6 +351,7 @@ void popStackFrame(const QBDI::VMInstanceRef &vm) {
     const auto &frame = stack.back();
     const auto &entry = frame.entry;
 
+    bool frameIsBranchToExternal = false;
     DILineInfo lineInfo;
     if (entry.isValid()) {
       lineInfo.FunctionName = entry.getShortName();
@@ -360,10 +361,15 @@ void popStackFrame(const QBDI::VMInstanceRef &vm) {
       // artificial frames
       lineInfo.Line = 0;
       lineInfo.Column = 0;
+    } else if (vm->getCachedInstAnalysis(frame.callToAddress) &&
+               vm->getCachedInstAnalysis(frame.callToAddress)->isBranch) {
+      // Frame appears to represent a branch to external code
+      frameIsBranchToExternal = true;
     }
 
-    printEventFromLineInfo(lineInfo, EventType::ReturnFrom, EventSource::Stack,
-                           frame.callToAddress, vm);
+    if (includeExternalLibrary || !frameIsBranchToExternal)
+      printEventFromLineInfo(lineInfo, EventType::ReturnFrom,
+                             EventSource::Stack, frame.callToAddress, vm);
     popStackFrame(vm);
   }
 }
