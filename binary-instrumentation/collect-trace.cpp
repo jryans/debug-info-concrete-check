@@ -576,10 +576,11 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
 
   // If the currently analysed instruction is a call or branch,
   // use the next instruction's address to check if we moved to external code
+  bool nextInstInCurrentModule = true;
   if (currInstIsCall || currInstIsBranch) {
     // Check whether we moved to external code
-    const bool inCurrentModule = isAddressInCurrentModule(nextAddress);
-    if (!inCurrentModule) {
+    nextInstInCurrentModule = isAddressInCurrentModule(nextAddress);
+    if (!nextInstInCurrentModule) {
       if (verbose) {
         *trace << "Inst. moved to external code: "
                << format_hex(gprState->rip, 18) << "\n";
@@ -628,6 +629,11 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
 
   // Reset did change tracker
   stackDepthChanged = false;
+
+  // If we moved to external code and external libraries are disabled,
+  // drop any queued call events we may have.
+  if (!nextInstInCurrentModule && !includeExternalLibrary)
+    dropQueue();
 
   // If the currently analysed instruction is a return,
   // pop the current stack frame (along with any artificial frames)
