@@ -617,16 +617,17 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
   // If the currently analysed instruction is call-like (call or tail call),
   // push a new stack frame using the debug entry inside the callee
   if (currInstIsCall || currInstIsTailCall) {
-    // Get the inlined chain for the next instruction for local use in this hook
-    // only. We do not store this in global state, as that's meant to track the
-    // current module only.
-    SmallVector<DWARFDie, 4> nextInlinedChain;
-    getInlinedChain(nextAddress, nextInlinedChain);
+    // Get the inlined chain for the next instruction.
+    // Note that is currently also (somewhat awkwardly) saved to shared state as
+    // well because the internal function filter depends on it.
+    // TODO: Remove this dependency
+    inlinedChain.clear();
+    getInlinedChain(nextAddress, inlinedChain);
 
     // If the inlined chain is empty (implying no debug info for this address),
     // we still push an (empty) entry to record the stack depth change.
-    if (!nextInlinedChain.empty())
-      pushStackFrame(nextInlinedChain.back());
+    if (!inlinedChain.empty())
+      pushStackFrame(inlinedChain.back());
     else
       pushStackFrame(DWARFDie());
     // Capture the first address encountered in the callee's frame
