@@ -56,7 +56,7 @@ std::vector<QBDI::MemoryMap> currentModuleMemoryMaps;
 // to post-instruction hook.
 
 bool currInstIsCall = false;
-bool currInstIsCallLike = false;
+bool currInstIsTailCall = false;
 bool currInstIsBranch = false;
 bool currInstIsReturn = false;
 QBDI::rword prevCallReturnTarget = 0;
@@ -99,6 +99,9 @@ struct StackFrame {
   // When a return instruction is encountered, it will pop the current frame and
   // any adjacent artificial frames (as we must assume they are now gone).
   bool isArtificial = false;
+
+  // The first address we encountered when calling into this frame.
+  QBDI::rword callToAddress;
 };
 
 // Newest frames are at the end of the stack vector
@@ -328,7 +331,7 @@ void pushStackFrame(const DWARFDie &entry) {
     stackDepthChanged = true;
 }
 
-void popStackFrame() {
+void popStackFrame(const QBDI::VMInstanceRef &vm) {
   if (!stack.empty()) {
     stack.pop_back();
     if (verbose)
@@ -345,20 +348,23 @@ void popStackFrame() {
     if (verbose)
       *trace << "Returning from artificial frame\n";
 
-    const auto &entry = stack.back().entry;
+    const auto &frame = stack.back();
+    const auto &entry = frame.entry;
 
     DILineInfo lineInfo;
-    lineInfo.FunctionName = entry.getShortName();
+    if (entry.isValid()) {
+      lineInfo.FunctionName = entry.getShortName();
+      lineInfo.FileName =
+          entry.getDeclFile(DILineInfoSpecifier::FileLineInfoKind::RawValue);
+      // Source coordinates not generally available when leaving these
+      // artificial frames
+      lineInfo.Line = 0;
+      lineInfo.Column = 0;
+    }
 
-    lineInfo.FileName =
-        entry.getDeclFile(DILineInfoSpecifier::FileLineInfoKind::RawValue);
-    // Source coordinates not generally available when leaving these
-    // artificial frames
-    lineInfo.Line = 0;
-    lineInfo.Column = 0;
-
-    printEventFromLineInfo(lineInfo, EventType::ReturnFrom, EventSource::Stack);
-    popStackFrame();
+    printEventFromLineInfo(lineInfo, EventType::ReturnFrom, EventSource::Stack,
+                           frame.callToAddress, vm);
+    popStackFrame(vm);
   }
 }
 
@@ -377,6 +383,8 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
   // JRS: We can still access instruction analysis for the current instruction
   // in the post-instruction hook. Should we do that instead of shared state...?
   currInstIsCall = instAnalysis->isCall;
+  // Tail call status discovered in several places across both hooks
+  currInstIsTailCall = false;
   currInstIsBranch = instAnalysis->isBranch;
   currInstIsReturn = instAnalysis->isReturn;
 
@@ -419,7 +427,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       if (verbose)
         *trace << "Call return target matches\n";
       prevCallReturnTarget = 0;
-      popStackFrame();
+      popStackFrame(vm);
     }
   }
 
@@ -490,7 +498,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       }
       printReturnFromEventForInlinedEntry(stack.back().entry);
       // JRS: Not sure yet if inline-pop should also pop artificial frames...
-      popStackFrame();
+      popStackFrame(vm);
     }
     // From the alignment block above,
     // we know there must be at least one chain link in the stack
@@ -513,34 +521,27 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
   }
 
   // Examine branches in case they are actually tail calls
-  bool isTailCall = false;
   if (currInstIsBranch && !inlinedChain.empty()) {
     const auto callSite = getCallSiteEntry(inlinedChain.back(), address);
     if (const auto attrValue = callSite.find(dwarf::DW_AT_call_tail_call)) {
-      // Branch is a tail call
-      isTailCall = true;
-      if (verbose)
-        *trace << "Branch is a tail call\n";
-      // Current frame becomes artificial after tail call
-      stack.back().isArtificial = true;
+      // Stack marked as artificial in post-instruction hook
+      currInstIsTailCall = true;
     }
   }
 
-  // For call-like instructions, we push stack frame in post-instruction hook
-  // (so that we push the debug entry for the callee)
-  currInstIsCallLike = currInstIsCall || isTailCall;
   // Our view of stack depth changes even for tail calls.
   // We preserve tail caller frames as artificial and
   // push additional frames for the tail callee.
-  const bool stackDepthWillChange = currInstIsCallLike || currInstIsReturn;
+  const bool stackDepthMayChange = instAnalysis->affectControlFlow;
 
   // Log to trace before stack depth changes (by this instruction)
-  // JRS: Perhaps always queue "call from" for call and branches,
-  // then remove in post if it didn't happen...?
-  if (stackDepthWillChange) {
+  if (stackDepthMayChange) {
     const size_t depth = stack.size();
-    if (currInstIsCallLike) {
-      // Queue for (potential) future printing based on next instruction
+    if (currInstIsCall || currInstIsBranch) {
+      // Queue for (potential) future printing based on next instruction.
+      // We may drop the call based on filtering rules (e.g. external code).
+      // We don't know for certain whether a branch is or is not a tail call
+      // here, as it might be treated as tail call by moving to external code.
       queuedCallFromEvent = [=]() {
         // Will have access to the _next_ instruction's inlined chain when run,
         // which is checked by `isFunctionPrintable` to filter internal function
@@ -556,7 +557,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
   }
 
   // In verbose mode, log current instruction, but only if other blocks will not
-  if (verbose && !stackDepthWillChange) {
+  if (verbose && !stackDepthMayChange) {
     printEventFromLineInfo(lineInfo, EventType::Verbose, EventSource::Verbose,
                            address, vm);
   }
@@ -589,9 +590,27 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
     }
   }
 
-  // If the currently analysed instruction is call-like,
+  // If the currently analysed instruction is a branch and moved to external,
+  // treat this as a tail call
+  if (currInstIsBranch && !nextInstInCurrentModule)
+    currInstIsTailCall = true;
+
+  // If we detected a tail call via any means, log and mark the stack
+  if (currInstIsTailCall) {
+    if (verbose)
+      *trace << "Branch is a tail call\n";
+    // Current frame becomes artificial after tail call
+    stack.back().isArtificial = true;
+  }
+
+  // We now know (as best we can) if a branch is or is not a tail call,
+  // so we drop the queued call event if it is not
+  if (currInstIsBranch && !currInstIsTailCall)
+    dropQueue();
+
+  // If the currently analysed instruction is call-like (call or tail call),
   // push a new stack frame using the debug entry inside the callee
-  if (currInstIsCallLike) {
+  if (currInstIsCall || currInstIsTailCall) {
     // Get the inlined chain for the next instruction for local use in this hook
     // only. We do not store this in global state, as that's meant to track the
     // current module only.
@@ -604,6 +623,8 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
       pushStackFrame(nextInlinedChain.back());
     else
       pushStackFrame(DWARFDie());
+    // Capture the first address encountered in the callee's frame
+    stack.back().callToAddress = nextAddress;
 
     // We will track the address to return to so we can compare to stack value
     // on next instrumented instruction to check whether we followed the call.
@@ -641,7 +662,7 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
   if (currInstIsReturn) {
     // Clear return target when we see an instrumented return
     prevCallReturnTarget = 0;
-    popStackFrame();
+    popStackFrame(vm);
   }
 
   // Add extra line break in verbose mode for readability
