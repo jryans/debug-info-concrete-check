@@ -70,6 +70,7 @@ std::optional<std::function<void()>> queuedCallFromEvent;
 std::optional<std::function<void()>> queuedCallToEvent;
 
 void dropQueue() {
+  // TODO: Dropped events should still be printed in verbose mode
   queuedCallFromEvent = std::nullopt;
   queuedCallToEvent = std::nullopt;
 }
