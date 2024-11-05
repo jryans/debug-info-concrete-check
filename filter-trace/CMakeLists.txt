@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(binary-instrumentation)
+project(filter-trace)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
 
@@ -12,21 +12,13 @@ if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
   add_compile_options(-UNDEBUG)
 endif()
 
-# collect-trace-preload
+# filter-trace
 
-find_package(QBDI REQUIRED)
-find_package(QBDIPreload REQUIRED)
-
-add_library(collect-trace-preload SHARED
-  collect-trace.cpp
+add_executable(filter-trace
+  filter-trace.cpp
 )
 
-target_link_libraries(collect-trace-preload PRIVATE
-  QBDI::QBDI
-  QBDIPreload::QBDIPreload
-)
-
-set_target_properties(collect-trace-preload PROPERTIES
+set_target_properties(filter-trace PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
 )
@@ -58,17 +50,15 @@ foreach(vname ${LLVM_VARS})
   endif()
 endforeach()
 
-target_include_directories(collect-trace-preload PRIVATE
+target_include_directories(filter-trace PRIVATE
   ${LLVM_INCLUDE_DIRS}
 )
 
 set(LLVM_COMPONENTS
-  DebugInfoDWARF
-  Object
   Support
 )
 get_llvm_libs(LLVM_LIBS ${LLVM_COMPONENTS})
-target_link_libraries(collect-trace-preload PRIVATE
+target_link_libraries(filter-trace PRIVATE
   ${ZLIB_LIBRARY}
   zstd::libzstd_shared
   ${LLVM_LIBS}
@@ -76,12 +66,12 @@ target_link_libraries(collect-trace-preload PRIVATE
 
 # LLVM is usually built without exceptions and RTTI, so we need to do the same
 if(NOT LLVM_ENABLE_EH)
-  target_compile_options(collect-trace-preload PRIVATE
+  target_compile_options(filter-trace PRIVATE
     -fno-exceptions
   )
 endif()
 if(NOT LLVM_ENABLE_RTTI)
-  target_compile_options(collect-trace-preload PRIVATE
+  target_compile_options(filter-trace PRIVATE
     -fno-rtti
   )
 endif()
