@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(debug-info-concrete-check)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
 
 # Assertions
 
