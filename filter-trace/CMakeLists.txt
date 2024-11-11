@@ -55,6 +55,8 @@ target_include_directories(filter-trace PRIVATE
 )
 
 set(LLVM_COMPONENTS
+  Core
+  IRReader
   Support
 )
 get_llvm_libs(LLVM_LIBS ${LLVM_COMPONENTS})
