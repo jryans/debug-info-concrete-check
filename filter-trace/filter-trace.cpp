@@ -28,6 +28,11 @@ cl::opt<std::string>
                cl::desc("<module (.bc/.ll) with function attrs>"),
                cl::cat(filterCategory));
 
+cl::opt<bool> listFunctions(
+    "list-functions",
+    cl::desc("Print all functions that would be filtered and exit"),
+    cl::cat(filterCategory));
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -57,10 +62,14 @@ int main(int argc, char **argv) {
       if (sp)
         name = sp->getName();
       onlyReadMemoryFunctions.insert(name.str());
-      // outs() << name << "\n";
     }
   }
-  outs() << "Count: " << onlyReadMemoryFunctions.size() << "\n";
+
+  if (listFunctions) {
+    for (const auto &functionName : onlyReadMemoryFunctions)
+      outs() << functionName << "\n";
+    return EXIT_SUCCESS;
+  }
 
   return EXIT_SUCCESS;
 }
