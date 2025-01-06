@@ -12,13 +12,13 @@ if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
   add_compile_options(-UNDEBUG)
 endif()
 
-# filter-trace
+# filter-trace-memory-effects
 
-add_executable(filter-trace
-  filter-trace.cpp
+add_executable(filter-trace-memory-effects
+  filter-trace-memory-effects.cpp
 )
 
-set_target_properties(filter-trace PROPERTIES
+set_target_properties(filter-trace-memory-effects PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
 )
@@ -50,7 +50,7 @@ foreach(vname ${LLVM_VARS})
   endif()
 endforeach()
 
-target_include_directories(filter-trace PRIVATE
+target_include_directories(filter-trace-memory-effects PRIVATE
   ${LLVM_INCLUDE_DIRS}
 )
 
@@ -60,7 +60,7 @@ set(LLVM_COMPONENTS
   Support
 )
 get_llvm_libs(LLVM_LIBS ${LLVM_COMPONENTS})
-target_link_libraries(filter-trace PRIVATE
+target_link_libraries(filter-trace-memory-effects PRIVATE
   ${ZLIB_LIBRARY}
   zstd::libzstd_shared
   ${LLVM_LIBS}
@@ -68,12 +68,12 @@ target_link_libraries(filter-trace PRIVATE
 
 # LLVM is usually built without exceptions and RTTI, so we need to do the same
 if(NOT LLVM_ENABLE_EH)
-  target_compile_options(filter-trace PRIVATE
+  target_compile_options(filter-trace-memory-effects PRIVATE
     -fno-exceptions
   )
 endif()
 if(NOT LLVM_ENABLE_RTTI)
-  target_compile_options(filter-trace PRIVATE
+  target_compile_options(filter-trace-memory-effects PRIVATE
     -fno-rtti
   )
 endif()
