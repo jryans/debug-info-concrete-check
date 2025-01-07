@@ -12,17 +12,6 @@ if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
   add_compile_options(-UNDEBUG)
 endif()
 
-# filter-trace-memory-effects
-
-add_executable(filter-trace-memory-effects
-  filter-trace-memory-effects.cpp
-)
-
-set_target_properties(filter-trace-memory-effects PROPERTIES
-  CXX_STANDARD 17
-  CXX_STANDARD_REQUIRED ON
-)
-
 # LLVM
 
 find_package(ZLIB REQUIRED)
@@ -50,20 +39,74 @@ foreach(vname ${LLVM_VARS})
   endif()
 endforeach()
 
-target_include_directories(filter-trace-memory-effects PRIVATE
+# filter-trace-inlining
+
+add_executable(filter-trace-inlining
+  filter-trace-inlining.cpp
+)
+
+set_target_properties(filter-trace-inlining PROPERTIES
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED ON
+)
+
+## LLVM for filter-trace-inlining
+
+target_include_directories(filter-trace-inlining PRIVATE
   ${LLVM_INCLUDE_DIRS}
 )
 
-set(LLVM_COMPONENTS
+set(LLVM_COMPONENTS_INLINING
   Core
   IRReader
   Support
 )
-get_llvm_libs(LLVM_LIBS ${LLVM_COMPONENTS})
+get_llvm_libs(LLVM_LIBS_INLINING ${LLVM_COMPONENTS_INLINING})
+target_link_libraries(filter-trace-inlining PRIVATE
+  ${ZLIB_LIBRARY}
+  zstd::libzstd_shared
+  ${LLVM_LIBS_INLINING}
+)
+
+# LLVM is usually built without exceptions and RTTI, so we need to do the same
+if(NOT LLVM_ENABLE_EH)
+  target_compile_options(filter-trace-inlining PRIVATE
+    -fno-exceptions
+  )
+endif()
+if(NOT LLVM_ENABLE_RTTI)
+  target_compile_options(filter-trace-inlining PRIVATE
+    -fno-rtti
+  )
+endif()
+
+# filter-trace-memory-effects
+
+add_executable(filter-trace-memory-effects
+  filter-trace-memory-effects.cpp
+)
+
+set_target_properties(filter-trace-memory-effects PROPERTIES
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED ON
+)
+
+## LLVM for filter-trace-memory-effects
+
+target_include_directories(filter-trace-memory-effects PRIVATE
+  ${LLVM_INCLUDE_DIRS}
+)
+
+set(LLVM_COMPONENTS_MEMORY_EFFECTS
+  Core
+  IRReader
+  Support
+)
+get_llvm_libs(LLVM_LIBS_MEMORY_EFFECTS ${LLVM_COMPONENTS_MEMORY_EFFECTS})
 target_link_libraries(filter-trace-memory-effects PRIVATE
   ${ZLIB_LIBRARY}
   zstd::libzstd_shared
-  ${LLVM_LIBS}
+  ${LLVM_LIBS_MEMORY_EFFECTS}
 )
 
 # LLVM is usually built without exceptions and RTTI, so we need to do the same
