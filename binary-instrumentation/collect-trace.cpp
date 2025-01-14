@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <system_error>
@@ -68,6 +69,9 @@ SmallVector<DWARFDie, 4> prevInlinedChain;
 // for the next instruction, so we queue them here for potential printing.
 std::optional<std::function<void()>> queuedCallFromEvent;
 std::optional<std::function<void()>> queuedCallToEvent;
+
+// Tracks a single call-like entry address for each inlined call site
+std::map<DWARFDie, QBDI::rword> inlinedEntryAddresses;
 
 void dropQueue() {
   // TODO: Dropped events should still be printed in verbose mode
@@ -517,6 +521,23 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       // Print call frame info _before_ pushing, since simulated call would
       // have occurred in frame before the one being pushed
       const auto &entry = inlinedChain[i];
+      // Check whether this is the entry control flow edge into this
+      // inlined call site (`DW_TAG_inlined_subroutine` instance), which
+      // approximates a call instruction for inlined code.
+      // The entry edge is defined as the first address we reach inside the
+      // inlined subprogram's address range.
+      const auto &entryAddressIter = inlinedEntryAddresses.find(entry);
+      if (entryAddressIter != inlinedEntryAddresses.end()) {
+        const auto &entryAddress = entryAddressIter->second;
+        // Only update stack for inlined call site when at the entry address
+        if (address != entryAddress) {
+          if (verbose)
+            *trace << "Not at entry address, skipping inlined frame\n";
+          continue;
+        }
+      } else {
+        inlinedEntryAddresses[entry] = address;
+      }
       printCallFromEventForInlinedEntry(entry);
       pushStackFrame(entry);
       printCallToEventForInlinedEntry(entry);
