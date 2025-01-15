@@ -489,6 +489,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     // Pop any stack frames not found in the new inlined chain
     size_t chainIdxNewestMatchingStack = SIZE_T_MAX;
     size_t stackItemsToCheck = stack.size() - stackIdxOldestChainLink;
+    size_t queuedStackPops = 0;
     if (verbose)
       *trace << "Popping any frames not found\n";
     for (size_t i = stackItemsToCheck; i--;) {
@@ -506,13 +507,41 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
         chainIdxNewestMatchingStack = i;
         break;
       }
-      printReturnFromEventForInlinedEntry(stack.back().entry);
-      // JRS: Not sure yet if inline-pop should also pop artificial frames...
-      popStackFrame(vm);
+      // Queue pops for now, as next block may decide to abort early
+      queuedStackPops++;
     }
     // From the alignment block above,
     // we know there must be at least one chain link in the stack
     assert(chainIdxNewestMatchingStack != SIZE_T_MAX);
+
+    // For the first new frame...
+    // Check whether this is the entry control flow edge into this
+    // inlined call site (`DW_TAG_inlined_subroutine` instance), which
+    // approximates a call instruction for inlined code.
+    // The entry edge is defined as the first address we reach inside the
+    // inlined subprogram's address range.
+    if (chainIdxNewestMatchingStack + 1 < newChainSize) {
+      const auto &firstNewEntry = inlinedChain[chainIdxNewestMatchingStack + 1];
+      const auto &entryAddressIter = inlinedEntryAddresses.find(firstNewEntry);
+      if (entryAddressIter != inlinedEntryAddresses.end()) {
+        const auto &entryAddress = entryAddressIter->second;
+        // Only update stack for inlined call site when at the entry address
+        if (address != entryAddress) {
+          if (verbose)
+            *trace << "Not at entry address, skipping inlined frame\n";
+          goto afterInlinedChain;
+        }
+      } else {
+        inlinedEntryAddresses[firstNewEntry] = address;
+      }
+    }
+
+    // Apply any queued stack pops
+    for (; queuedStackPops; --queuedStackPops) {
+      printReturnFromEventForInlinedEntry(stack.back().entry);
+      // JRS: Not sure yet if inline-pop should also pop artificial frames...
+      popStackFrame(vm);
+    }
 
     // Push any new frames beyond what is already in the stack
     if (verbose)
@@ -521,23 +550,6 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       // Print call frame info _before_ pushing, since simulated call would
       // have occurred in frame before the one being pushed
       const auto &entry = inlinedChain[i];
-      // Check whether this is the entry control flow edge into this
-      // inlined call site (`DW_TAG_inlined_subroutine` instance), which
-      // approximates a call instruction for inlined code.
-      // The entry edge is defined as the first address we reach inside the
-      // inlined subprogram's address range.
-      const auto &entryAddressIter = inlinedEntryAddresses.find(entry);
-      if (entryAddressIter != inlinedEntryAddresses.end()) {
-        const auto &entryAddress = entryAddressIter->second;
-        // Only update stack for inlined call site when at the entry address
-        if (address != entryAddress) {
-          if (verbose)
-            *trace << "Not at entry address, skipping inlined frame\n";
-          continue;
-        }
-      } else {
-        inlinedEntryAddresses[entry] = address;
-      }
       printCallFromEventForInlinedEntry(entry);
       pushStackFrame(entry);
       printCallToEventForInlinedEntry(entry);
@@ -547,6 +559,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     prevInlinedChain = inlinedChain;
   }
 
+afterInlinedChain:
   // Examine branches in case they are actually tail calls
   if (currInstIsBranch && !inlinedChain.empty()) {
     const auto callSite = getCallSiteEntry(inlinedChain.back(), address);
