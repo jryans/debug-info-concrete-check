@@ -514,15 +514,15 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     // we know there must be at least one chain link in the stack
     assert(chainIdxNewestMatchingStack != SIZE_T_MAX);
 
-    // For the first new frame...
+    // For the last new frame...
     // Check whether this is the entry control flow edge into this
     // inlined call site (`DW_TAG_inlined_subroutine` instance), which
     // approximates a call instruction for inlined code.
     // The entry edge is defined as the first address we reach inside the
     // inlined subprogram's address range.
     if (chainIdxNewestMatchingStack + 1 < newChainSize) {
-      const auto &firstNewEntry = inlinedChain[chainIdxNewestMatchingStack + 1];
-      const auto &entryAddressIter = inlinedEntryAddresses.find(firstNewEntry);
+      const auto &lastNewEntry = inlinedChain[newChainSize - 1];
+      const auto &entryAddressIter = inlinedEntryAddresses.find(lastNewEntry);
       if (entryAddressIter != inlinedEntryAddresses.end()) {
         const auto &entryAddress = entryAddressIter->second;
         // Only update stack for inlined call site when at the entry address
@@ -532,7 +532,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
           goto afterInlinedChain;
         }
       } else {
-        inlinedEntryAddresses[firstNewEntry] = address;
+        inlinedEntryAddresses[lastNewEntry] = address;
       }
     }
 
