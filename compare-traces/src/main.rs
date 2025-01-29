@@ -2,6 +2,7 @@ use std::{fs, path::PathBuf};
 
 use anyhow::{Context, Ok, Result};
 use clap::Parser;
+use console::Style;
 use similar::{ChangeTag, TextDiff};
 
 #[derive(Parser, Debug)]
@@ -32,12 +33,12 @@ fn main() -> Result<()> {
     let diff = TextDiff::from_lines(&before_content,&after_content);
 
     for change in diff.iter_all_changes() {
-        let sign = match change.tag() {
-            ChangeTag::Delete => "-",
-            ChangeTag::Insert => "+",
-            ChangeTag::Equal => " ",
+        let (sign, style) = match change.tag() {
+            ChangeTag::Delete => ("-", Style::new().red()),
+            ChangeTag::Insert => ("+", Style::new().green()),
+            ChangeTag::Equal => (" ", Style::new()),
         };
-        print!("{}{}", sign, change);
+        print!("{}{}", style.apply_to(sign).bold(), style.apply_to(change));
     }
 
     Ok(())
