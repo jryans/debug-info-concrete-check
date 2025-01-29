@@ -6,6 +6,9 @@ authors = ["J. Ryan Stinnett <jryans@gmail.com>"]
 description = "Compares dynamic instrumentation traces and reports divergences"
 
 [dependencies]
+anyhow = "1.0.95"
+clap = { version = "4.5.27", features = ["derive"] }
+similar = "2.7.0"
 
 [profile.dev]
 split-debuginfo = "packed"
