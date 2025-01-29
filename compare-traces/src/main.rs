@@ -3,7 +3,7 @@ use std::{fs, path::PathBuf};
 use anyhow::{Context, Ok, Result};
 use clap::Parser;
 use console::Style;
-use similar::{ChangeTag, TextDiff};
+use similar::{ChangeTag, DiffTag, TextDiff};
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -34,13 +34,35 @@ fn main() -> Result<()> {
         .algorithm(similar::Algorithm::Patience)
         .diff_lines(&before_content,&after_content);
 
-    for change in diff.iter_all_changes() {
-        let (sign, style) = match change.tag() {
-            ChangeTag::Delete => ("-", Style::new().red()),
-            ChangeTag::Insert => ("+", Style::new().green()),
-            ChangeTag::Equal => (" ", Style::new()),
-        };
-        print!("{}{}", style.apply_to(sign).bold(), style.apply_to(change));
+    for op in diff.ops() {
+        let change_tuples: Vec<_> = op
+            .iter_slices(diff.old_slices(), diff.new_slices())
+            .collect();
+        if op.tag() == DiffTag::Replace {
+            assert!(change_tuples.len() == 2);
+            for (tag, slices) in change_tuples {
+                let (sign, style) = match tag {
+                    ChangeTag::Delete => ("<", Style::new().magenta()),
+                    ChangeTag::Insert => (">", Style::new().yellow()),
+                    ChangeTag::Equal => unreachable!(),
+                };
+                for slice in slices {
+                    print!("{}{}", style.apply_to(sign).bold(), style.apply_to(slice));
+                }
+            }
+        } else {
+            assert!(change_tuples.len() == 1);
+            for (tag, slices) in change_tuples {
+                let (sign, style) = match tag {
+                    ChangeTag::Delete => ("-", Style::new().red()),
+                    ChangeTag::Insert => ("+", Style::new().green()),
+                    ChangeTag::Equal => (" ", Style::new()),
+                };
+                for slice in slices {
+                    print!("{}{}", style.apply_to(sign).bold(), style.apply_to(slice));
+                }
+            }
+        }
     }
 
     Ok(())
