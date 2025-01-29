@@ -1,0 +1,11 @@
+[package]
+name = "debug-info-concrete-compare-traces"
+version = "0.1.0"
+edition = "2021"
+authors = ["J. Ryan Stinnett <jryans@gmail.com>"]
+description = "Compares dynamic instrumentation traces and reports divergences"
+
+[dependencies]
+
+[profile.dev]
+split-debuginfo = "packed"
