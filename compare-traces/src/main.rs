@@ -30,7 +30,9 @@ fn main() -> Result<()> {
         )
     })?;
 
-    let diff = TextDiff::from_lines(&before_content,&after_content);
+    let diff = TextDiff::configure()
+        .algorithm(similar::Algorithm::Patience)
+        .diff_lines(&before_content,&after_content);
 
     for change in diff.iter_all_changes() {
         let (sign, style) = match change.tag() {
