@@ -12,10 +12,18 @@ struct Cli {
     before_file: PathBuf,
     /// Trace after program transformations
     after_file: PathBuf,
+
+    /// Whether to use terminal colors
+    #[arg(long)]
+    color: Option<bool>,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    if let Some(colors_enabled) = cli.color {
+        console::set_colors_enabled(colors_enabled);
+    }
 
     let before_content = fs::read_to_string(&cli.before_file).with_context(|| {
         format!(
