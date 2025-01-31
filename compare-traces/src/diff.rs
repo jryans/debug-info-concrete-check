@@ -1,7 +1,7 @@
 use console::Style;
 use similar::{ChangeTag, DiffTag, TextDiff};
 
-pub fn print_diff(diff: TextDiff<'_, '_, '_, str>) {
+pub fn print_diff(diff: &TextDiff<'_, '_, '_, str>) {
     // TODO: Add `context` option to reveal surrounding lines when desired
     for op_group in diff.grouped_ops(0) {
         for op in op_group {

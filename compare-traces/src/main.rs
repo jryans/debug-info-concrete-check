@@ -1,11 +1,13 @@
 use std::{fs, path::PathBuf};
 
 use crate::diff::print_diff;
+use crate::report::analyse_and_print_report;
 use anyhow::{Context, Ok, Result};
 use clap::Parser;
 use similar::TextDiff;
 
 mod diff;
+mod report;
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -22,6 +24,10 @@ struct Cli {
     /// Show trace diff
     #[arg(long)]
     diff: bool,
+
+    /// Analyse and report trace divergences
+    #[arg(long, default_value_t = true)]
+    report: bool,
 }
 
 fn main() -> Result<()> {
@@ -49,9 +55,12 @@ fn main() -> Result<()> {
         .diff_lines(&before_content,&after_content);
 
     if cli.diff {
-        print_diff(diff);
+        print_diff(&diff);
+    }
+
+    if cli.report {
+        analyse_and_print_report(&diff);
     }
 
     Ok(())
 }
-
