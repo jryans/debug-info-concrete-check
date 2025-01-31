@@ -1,9 +1,11 @@
 use std::{fs, path::PathBuf};
 
+use crate::diff::print_diff;
 use anyhow::{Context, Ok, Result};
 use clap::Parser;
-use console::Style;
-use similar::{ChangeTag, DiffTag, TextDiff};
+use similar::TextDiff;
+
+mod diff;
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -16,6 +18,10 @@ struct Cli {
     /// Whether to use terminal colors
     #[arg(long)]
     color: Option<bool>,
+
+    /// Show trace diff
+    #[arg(long)]
+    diff: bool,
 }
 
 fn main() -> Result<()> {
@@ -42,40 +48,10 @@ fn main() -> Result<()> {
         .algorithm(similar::Algorithm::Patience)
         .diff_lines(&before_content,&after_content);
 
-    // TODO: Add `context` option to reveal surrounding lines when desired
-    for op_group in diff.grouped_ops(0) {
-        for op in op_group {
-            let change_tuples: Vec<_> = op
-                .iter_slices(diff.old_slices(), diff.new_slices())
-                .collect();
-            if op.tag() == DiffTag::Replace {
-                assert!(change_tuples.len() == 2);
-                for (tag, slices) in change_tuples {
-                    let (sign, style) = match tag {
-                        ChangeTag::Delete => ("<", Style::new().magenta()),
-                        ChangeTag::Insert => (">", Style::new().yellow()),
-                        ChangeTag::Equal => unreachable!(),
-                    };
-                    for slice in slices {
-                        print!("{}{}", style.apply_to(sign).bold(), style.apply_to(slice));
-                    }
-                }
-            } else {
-                assert!(change_tuples.len() == 1);
-                for (tag, slices) in change_tuples {
-                    let (sign, style) = match tag {
-                        ChangeTag::Delete => ("-", Style::new().red()),
-                        ChangeTag::Insert => ("+", Style::new().green()),
-                        ChangeTag::Equal => (" ", Style::new()),
-                    };
-                    for slice in slices {
-                        print!("{}{}", style.apply_to(sign).bold(), style.apply_to(slice));
-                    }
-                }
-            }
-        }
-        println!("---");
+    if cli.diff {
+        print_diff(diff);
     }
 
     Ok(())
 }
+
