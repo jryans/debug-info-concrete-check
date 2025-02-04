@@ -28,10 +28,17 @@ struct Cli {
     /// Analyse and report trace divergences
     #[arg(long, default_value_t = true)]
     report: bool,
+
+    #[command(flatten)]
+    verbose: clap_verbosity_flag::Verbosity,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    env_logger::Builder::new()
+        .filter_level(cli.verbose.log_level_filter())
+        .init();
 
     if let Some(colors_enabled) = cli.color {
         console::set_colors_enabled(colors_enabled);

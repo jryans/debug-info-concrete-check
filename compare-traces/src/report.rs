@@ -1,6 +1,7 @@
 use std::{collections::VecDeque, vec};
 
 use anyhow::{anyhow, Ok, Result};
+use log::log_enabled;
 use similar::{ChangeTag, DiffOp, DiffTag, TextDiff};
 
 use crate::diff::print_change;
@@ -159,8 +160,9 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
                 .collect();
 
             // For debugging
-            if false {
+            if log_enabled!(log::Level::Debug) {
                 print_change(&op, &change_tuples_raw);
+                println!();
             }
 
             // Parse raw text into events
@@ -179,16 +181,16 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
 
             // Check events against known divergence patterns
             // TODO: Deduplicate divergences at same source location
-            divergences.append(&mut check_for_known_divergences(
+            let mut new_divergences = check_for_known_divergences(
                 &op,
                 &mut change_tuples_event,
-            ));
+            );
+            for divergence in &new_divergences {
+                println!("{:?}", divergence);
+                println!();
+            }
+            divergences.append(&mut new_divergences);
         }
-    }
-
-    for divergence in &divergences {
-        println!("{:?}", divergence);
-        println!();
     }
 
     println!("{} divergences found", divergences.len());
