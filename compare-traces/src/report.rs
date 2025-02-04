@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Ok, Result};
 use similar::{DiffOp, DiffTag, TextDiff};
 
+use crate::diff::print_change;
+
 #[derive(Debug)]
 enum EventType {
     CallFrom,
@@ -77,9 +79,12 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
                 })
                 .collect();
             println!("{:?}", change_tuples);
+
+            // For debugging
+            print_change(&op, &change_tuples_raw);
         }
+        println!();
     }
-    println!();
 
     println!("{} divergences found", divergences.len());
 }
