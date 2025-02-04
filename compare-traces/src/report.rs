@@ -1,9 +1,11 @@
+use std::{collections::VecDeque, vec};
+
 use anyhow::{anyhow, Ok, Result};
-use similar::{DiffOp, DiffTag, TextDiff};
+use similar::{ChangeTag, DiffOp, DiffTag, TextDiff};
 
 use crate::diff::print_change;
 
-#[derive(Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 enum EventType {
     CallFrom,
     CallTo,
@@ -49,11 +51,100 @@ impl Event {
     }
 }
 
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+enum DivergenceType {
+    RemovedLibraryCall,
+    Unknown,
+}
+
+#[derive(Debug)]
+struct Divergence {
+    divergence_type: DivergenceType,
+    events: Vec<Event>,
+}
+
+// Example diff:
+// - CF: strbuf_init at strbuf.c:57:2
+// -   CT: Jump to external code
+// -   CF: Jump to external code
+// -     CT: External code
+// -   RF: Jump to external code
+fn check_for_removed_library_call(
+    op: &DiffOp,
+    change_tuples_event: &mut [(ChangeTag, VecDeque<Event>)],
+) -> Option<Divergence> {
+    // Diff op for this region should be delete
+    if op.tag() != DiffTag::Delete {
+        return None;
+    }
+
+    // Should have a single tuple with deleted lines
+    if change_tuples_event.len() != 1 {
+        return None;
+    }
+    let (change_tag, events) = &mut change_tuples_event[0];
+    if *change_tag != ChangeTag::Delete {
+        return None;
+    }
+
+    // First event should be call from traced binary
+    if events[0].event_type != EventType::CallFrom {
+        return None;
+    }
+
+    // Second event should be call to external library
+    if events[1].event_type != EventType::CallTo {
+        return None;
+    }
+    if !events[1].detail.to_lowercase().contains("external code") {
+        return None;
+    }
+
+    // Extract related events
+    let mut related_events = vec![];
+
+    // First two are known to match
+    related_events.push(events.pop_front().unwrap());
+    related_events.push(events.pop_front().unwrap());
+
+    // Also take any more contiguous events about external code
+    while !events.is_empty() {
+        if !events[0].detail.to_lowercase().contains("external code") {
+            break;
+        }
+        related_events.push(events.pop_front().unwrap());
+    }
+
+    Some(Divergence {
+        divergence_type: DivergenceType::RemovedLibraryCall,
+        events: related_events,
+    })
+}
+
+fn check_for_known_divergences(
+    op: &DiffOp,
+    change_tuples_event: &mut [(ChangeTag, VecDeque<Event>)],
+) -> Vec<Divergence> {
+    let mut divergences = vec![];
+
+    // println!("{:?}", op);
+    // println!("{:?}", change_tuples_event);
+    // println!();
+
+    // TODO: Fix logic for multiple divergences in a single change region
+
+    if let Some(divergence) = check_for_removed_library_call(op, change_tuples_event) {
+        divergences.push(divergence);
+    }
+
+    divergences
+}
+
 pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
     println!("Analysing divergences…");
     println!();
 
-    let divergences: Vec<&str> = vec![]; // TODO: Change to parsed type
+    let mut divergences = vec![];
 
     for op_group in diff.grouped_ops(0) {
         for op in op_group {
@@ -66,23 +157,37 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
             let change_tuples_raw: Vec<_> = op
                 .iter_slices(diff.old_slices(), diff.new_slices())
                 .collect();
-            let change_tuples: Vec<_> = change_tuples_raw
+
+            // For debugging
+            if false {
+                print_change(&op, &change_tuples_raw);
+            }
+
+            // Parse raw text into events
+            let mut change_tuples_event: Vec<_> = change_tuples_raw
                 .iter()
                 .map(|(tag, strings)| {
                     (
-                        tag,
+                        tag.clone(),
                         strings
                             .iter()
                             .map(|str| Event::parse(str).unwrap())
-                            .collect::<Vec<_>>(),
+                            .collect::<VecDeque<_>>(),
                     )
                 })
                 .collect();
-            println!("{:?}", change_tuples);
 
-            // For debugging
-            print_change(&op, &change_tuples_raw);
+            // Check events against known divergence patterns
+            // TODO: Deduplicate divergences at same source location
+            divergences.append(&mut check_for_known_divergences(
+                &op,
+                &mut change_tuples_event,
+            ));
         }
+    }
+
+    for divergence in &divergences {
+        println!("{:?}", divergence);
         println!();
     }
 
