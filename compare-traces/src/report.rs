@@ -193,8 +193,10 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
             // TODO: Deduplicate divergences at same source location
             let mut new_divergences = check_for_known_divergences(&op, &mut change_tuples_events);
             for divergence in &new_divergences {
-                println!("{:?}", divergence);
-                println!();
+                if log_enabled!(log::Level::Debug) {
+                    println!("{:?}", divergence);
+                    println!();
+                }
             }
             divergences.append(&mut new_divergences);
         }
