@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::{collections::{HashMap, VecDeque}, hash::Hash};
 
 use anyhow::{anyhow, Ok, Result};
 use log::log_enabled;
@@ -221,14 +221,30 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
     println!("Reporting divergences by call site…");
     println!();
 
+    let mut divergence_call_site_count_by_type: HashMap<DivergenceType, u64> = HashMap::new();
     let mut occurrences_total: u64 = 0;
     for (divergence, occurrences) in &divergence_stats_by_call_site {
         println!("{:?}", divergence.divergence_type);
         println!("  Call site:   {}", divergence.call_site());
         println!("  Occurrences: {}", occurrences);
         println!();
+        if let Some(count) = divergence_call_site_count_by_type.get_mut(&divergence.divergence_type) {
+            *count += 1;
+        } else {
+            divergence_call_site_count_by_type.insert(divergence.divergence_type.clone(), 1);
+        }
         occurrences_total += occurrences;
     }
+
+    println!("Summarising call sites by divergence type…");
+    println!();
+
+    for (divergence_type, count) in &divergence_call_site_count_by_type {
+        println!("{:?}", divergence_type);
+        println!("  Call sites:  {}", count);
+        println!();
+    }
+
     println!("{} divergence call sites", divergence_stats_by_call_site.len());
     println!("{} divergence occurrences", occurrences_total);
 }
