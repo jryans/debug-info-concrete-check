@@ -72,7 +72,7 @@ struct Divergence {
 // -   RF: Jump to external code
 fn check_for_removed_library_call(
     op: &DiffOp,
-    change_tuples_event: &mut [(ChangeTag, VecDeque<Event>)],
+    change_tuples_events: &mut [(ChangeTag, VecDeque<Event>)],
 ) -> Option<Divergence> {
     // Diff op for this region should be delete
     if op.tag() != DiffTag::Delete {
@@ -80,10 +80,10 @@ fn check_for_removed_library_call(
     }
 
     // Should have a single tuple with deleted lines
-    if change_tuples_event.len() != 1 {
+    if change_tuples_events.len() != 1 {
         return None;
     }
-    let (change_tag, events) = &mut change_tuples_event[0];
+    let (change_tag, events) = &mut change_tuples_events[0];
     if *change_tag != ChangeTag::Delete {
         return None;
     }
@@ -124,7 +124,7 @@ fn check_for_removed_library_call(
 
 fn check_for_known_divergences(
     op: &DiffOp,
-    change_tuples_event: &mut [(ChangeTag, VecDeque<Event>)],
+    change_tuples_events: &mut [(ChangeTag, VecDeque<Event>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
@@ -134,7 +134,7 @@ fn check_for_known_divergences(
 
     // TODO: Fix logic for multiple divergences in a single change region
 
-    if let Some(divergence) = check_for_removed_library_call(op, change_tuples_event) {
+    if let Some(divergence) = check_for_removed_library_call(op, change_tuples_events) {
         divergences.push(divergence);
     }
 
@@ -155,18 +155,17 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
             }
 
             // TODO: Skip unnecessary collects
-            let change_tuples_raw: Vec<_> = op
+            let change_tuples_strings: Vec<_> = op
                 .iter_slices(diff.old_slices(), diff.new_slices())
                 .collect();
 
-            // For debugging
             if log_enabled!(log::Level::Debug) {
-                print_change(&op, &change_tuples_raw);
+                print_change(&op, &change_tuples_strings);
                 println!();
             }
 
             // Parse raw text into events
-            let mut change_tuples_event: Vec<_> = change_tuples_raw
+            let mut change_tuples_events: Vec<_> = change_tuples_strings
                 .iter()
                 .map(|(tag, strings)| {
                     (
@@ -181,10 +180,7 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
 
             // Check events against known divergence patterns
             // TODO: Deduplicate divergences at same source location
-            let mut new_divergences = check_for_known_divergences(
-                &op,
-                &mut change_tuples_event,
-            );
+            let mut new_divergences = check_for_known_divergences(&op, &mut change_tuples_events);
             for divergence in &new_divergences {
                 println!("{:?}", divergence);
                 println!();
