@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, vec};
+use std::collections::{HashMap, VecDeque};
 
 use anyhow::{anyhow, Ok, Result};
 use log::log_enabled;
@@ -6,7 +6,7 @@ use similar::{ChangeTag, DiffOp, DiffTag, TextDiff};
 
 use crate::diff::print_change;
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 enum EventType {
     CallFrom,
     CallTo,
@@ -14,7 +14,7 @@ enum EventType {
     // Verbose,
 }
 
-#[derive(Debug)]
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
 struct Event {
     event_type: EventType,
     // TODO: Maybe store reference instead...?
@@ -52,16 +52,24 @@ impl Event {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 enum DivergenceType {
     RemovedLibraryCall,
     Unknown,
 }
 
-#[derive(Debug)]
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
 struct Divergence {
     divergence_type: DivergenceType,
     events: Vec<Event>,
+}
+
+impl Divergence {
+    fn call_site(&self) -> &str {
+        assert!(!self.events.is_empty());
+        assert!(self.events[0].event_type == EventType::CallFrom);
+        &self.events[0].detail
+    }
 }
 
 // Example diff:
@@ -156,7 +164,7 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
     println!("Analysing divergences…");
     println!();
 
-    let mut divergences = vec![];
+    let mut divergence_stats_by_call_site: HashMap<Divergence, u64> = HashMap::new();
 
     for op_group in diff.grouped_ops(0) {
         for op in op_group {
@@ -190,19 +198,39 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
                 .collect();
 
             // Check events against known divergence patterns
-            // TODO: Deduplicate divergences at same source location
-            let mut new_divergences = check_for_known_divergences(&op, &mut change_tuples_events);
+            let new_divergences = check_for_known_divergences(&op, &mut change_tuples_events);
             for divergence in &new_divergences {
                 if log_enabled!(log::Level::Debug) {
                     println!("{:?}", divergence);
                     println!();
                 }
+
+                // Insert or update stats for this call site
+                if let Some(occurrences) = divergence_stats_by_call_site.get_mut(divergence) {
+                    *occurrences += 1;
+                } else {
+                    divergence_stats_by_call_site.insert(divergence.clone(), 1);
+                }
             }
-            divergences.append(&mut new_divergences);
         }
     }
 
-    println!("{} divergences found", divergences.len());
+    println!("Divergence analysis complete");
+    println!();
+
+    println!("Reporting divergences by call site…");
+    println!();
+
+    let mut occurrences_total: u64 = 0;
+    for (divergence, occurrences) in &divergence_stats_by_call_site {
+        println!("{:?}", divergence.divergence_type);
+        println!("  Call site:   {}", divergence.call_site());
+        println!("  Occurrences: {}", occurrences);
+        println!();
+        occurrences_total += occurrences;
+    }
+    println!("{} divergence call sites", divergence_stats_by_call_site.len());
+    println!("{} divergence occurrences", occurrences_total);
 }
 
 #[cfg(test)]
