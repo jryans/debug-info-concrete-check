@@ -46,7 +46,7 @@ impl Event {
         rest = &rest[4..];
 
         // For now, just stash the rest as event detail
-        let detail = rest.to_owned();
+        let detail = rest.trim_end().to_owned();
 
         Ok(Self { event_type, detail })
     }
@@ -227,23 +227,23 @@ mod tests {
             VecDeque::from([
                 Event {
                     event_type: EventType::CallFrom,
-                    detail: "strbuf_init at strbuf.c:57:2\n".to_owned(),
+                    detail: "strbuf_init at strbuf.c:57:2".to_owned(),
                 },
                 Event {
                     event_type: EventType::CallTo,
-                    detail: "Jump to external code\n".to_owned(),
+                    detail: "Jump to external code".to_owned(),
                 },
                 Event {
                     event_type: EventType::CallFrom,
-                    detail: "Jump to external code\n".to_owned(),
+                    detail: "Jump to external code".to_owned(),
                 },
                 Event {
                     event_type: EventType::CallTo,
-                    detail: "External code\n".to_owned(),
+                    detail: "External code".to_owned(),
                 },
                 Event {
                     event_type: EventType::ReturnFrom,
-                    detail: "Jump to external code\n".to_owned(),
+                    detail: "Jump to external code".to_owned(),
                 },
             ]),
         )];
@@ -280,43 +280,43 @@ mod tests {
             VecDeque::from([
                 Event {
                     event_type: EventType::CallFrom,
-                    detail: "init_repository_format at setup.c:710:33\n".to_owned(),
+                    detail: "init_repository_format at setup.c:710:33".to_owned(),
                 },
                 Event {
                     event_type: EventType::CallTo,
-                    detail: "Jump to external code\n".to_owned(),
+                    detail: "Jump to external code".to_owned(),
                 },
                 Event {
                     event_type: EventType::CallFrom,
-                    detail: "Jump to external code\n".to_owned(),
+                    detail: "Jump to external code".to_owned(),
                 },
                 Event {
                     event_type: EventType::CallTo,
-                    detail: "External code\n".to_owned(),
+                    detail: "External code".to_owned(),
                 },
                 Event {
                     event_type: EventType::ReturnFrom,
-                    detail: "Jump to external code\n".to_owned(),
+                    detail: "Jump to external code".to_owned(),
                 },
                 Event {
                     event_type: EventType::CallFrom,
-                    detail: "init_repository_format at setup.c:712:2\n".to_owned(),
+                    detail: "init_repository_format at setup.c:712:2".to_owned(),
                 },
                 Event {
                     event_type: EventType::CallTo,
-                    detail: "Jump to external code\n".to_owned(),
+                    detail: "Jump to external code".to_owned(),
                 },
                 Event {
                     event_type: EventType::CallFrom,
-                    detail: "Jump to external code\n".to_owned(),
+                    detail: "Jump to external code".to_owned(),
                 },
                 Event {
                     event_type: EventType::CallTo,
-                    detail: "External code\n".to_owned(),
+                    detail: "External code".to_owned(),
                 },
                 Event {
                     event_type: EventType::ReturnFrom,
-                    detail: "Jump to external code\n".to_owned(),
+                    detail: "Jump to external code".to_owned(),
                 },
             ]),
         )];
