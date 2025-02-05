@@ -215,10 +215,10 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
         }
     }
 
-    println!("Divergence analysis complete");
+    println!("Divergence analysis complete!");
     println!();
 
-    println!("Reporting divergences by call site…");
+    println!("## Divergences by call site");
     println!();
 
     let mut divergence_call_site_count_by_type: HashMap<DivergenceType, u64> = HashMap::new();
@@ -236,7 +236,7 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
         occurrences_total += occurrences;
     }
 
-    println!("Summarising call sites by divergence type…");
+    println!("## Call sites by divergence type");
     println!();
 
     for (divergence_type, count) in &divergence_call_site_count_by_type {
@@ -244,6 +244,9 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
         println!("  Call sites:  {}", count);
         println!();
     }
+
+    println!("## Summary");
+    println!();
 
     println!("{} divergence call sites", divergence_stats_by_call_site.len());
     println!("{} divergence occurrences", occurrences_total);
