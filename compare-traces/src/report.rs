@@ -88,6 +88,11 @@ fn check_for_removed_library_call(
         return None;
     }
 
+    // Must have at least 2 events
+    if events.len() < 2 {
+        return None;
+    }
+
     // First event should be call from traced binary
     if events[0].event_type != EventType::CallFrom {
         return None;
@@ -134,10 +139,14 @@ fn check_for_known_divergences(
         println!();
     }
 
-    // TODO: Fix logic for multiple divergences in a single change region
-
-    if let Some(divergence) = check_for_removed_library_call(op, change_tuples_events) {
-        divergences.push(divergence);
+    // Check for divergences at least once and keep going each time more are found
+    let mut continue_checking = true;
+    while continue_checking {
+        continue_checking = false;
+        if let Some(divergence) = check_for_removed_library_call(op, change_tuples_events) {
+            divergences.push(divergence);
+            continue_checking = true;
+        }
     }
 
     divergences
@@ -239,7 +248,84 @@ mod tests {
         let divergences = check_for_known_divergences(&op, &mut change_tuples_events);
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
-        assert_eq!(divergence.divergence_type, DivergenceType::RemovedLibraryCall);
+        assert_eq!(
+            divergence.divergence_type,
+            DivergenceType::RemovedLibraryCall
+        );
         assert_eq!(divergence.events.len(), 5);
+    }
+
+    #[test]
+    fn removed_library_call_multiple() {
+        // Example diff:
+        // - CF: init_repository_format at setup.c:710:33
+        // -   CT: Jump to external code
+        // -   CF: Jump to external code
+        // -     CT: External code
+        // -   RF: Jump to external code
+        // - CF: init_repository_format at setup.c:712:2
+        // -   CT: Jump to external code
+        // -   CF: Jump to external code
+        // -     CT: External code
+        // -   RF: Jump to external code
+        let op = DiffOp::Delete {
+            old_index: 25260,
+            old_len: 10,
+            new_index: 25114,
+        };
+        let mut change_tuples_events = [(
+            ChangeTag::Delete,
+            VecDeque::from([
+                Event {
+                    event_type: EventType::CallFrom,
+                    detail: "init_repository_format at setup.c:710:33\n".to_owned(),
+                },
+                Event {
+                    event_type: EventType::CallTo,
+                    detail: "Jump to external code\n".to_owned(),
+                },
+                Event {
+                    event_type: EventType::CallFrom,
+                    detail: "Jump to external code\n".to_owned(),
+                },
+                Event {
+                    event_type: EventType::CallTo,
+                    detail: "External code\n".to_owned(),
+                },
+                Event {
+                    event_type: EventType::ReturnFrom,
+                    detail: "Jump to external code\n".to_owned(),
+                },
+                Event {
+                    event_type: EventType::CallFrom,
+                    detail: "init_repository_format at setup.c:712:2\n".to_owned(),
+                },
+                Event {
+                    event_type: EventType::CallTo,
+                    detail: "Jump to external code\n".to_owned(),
+                },
+                Event {
+                    event_type: EventType::CallFrom,
+                    detail: "Jump to external code\n".to_owned(),
+                },
+                Event {
+                    event_type: EventType::CallTo,
+                    detail: "External code\n".to_owned(),
+                },
+                Event {
+                    event_type: EventType::ReturnFrom,
+                    detail: "Jump to external code\n".to_owned(),
+                },
+            ]),
+        )];
+        let divergences = check_for_known_divergences(&op, &mut change_tuples_events);
+        assert_eq!(divergences.len(), 2);
+        for divergence in &divergences {
+            assert_eq!(
+                divergence.divergence_type,
+                DivergenceType::RemovedLibraryCall
+            );
+            assert_eq!(divergence.events.len(), 5);
+        }
     }
 }
