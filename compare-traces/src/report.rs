@@ -128,9 +128,11 @@ fn check_for_known_divergences(
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
-    // println!("{:?}", op);
-    // println!("{:?}", change_tuples_event);
-    // println!();
+    if log_enabled!(log::Level::Debug) {
+        println!("{:?}", op);
+        println!("{:?}", change_tuples_events);
+        println!();
+    }
 
     // TODO: Fix logic for multiple divergences in a single change region
 
