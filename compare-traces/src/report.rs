@@ -193,3 +193,53 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
 
     println!("{} divergences found", divergences.len());
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn removed_library_call_single() {
+        // Example diff:
+        // - CF: strbuf_init at strbuf.c:57:2
+        // -   CT: Jump to external code
+        // -   CF: Jump to external code
+        // -     CT: External code
+        // -   RF: Jump to external code
+        let op = DiffOp::Delete {
+            old_index: 134,
+            old_len: 5,
+            new_index: 125,
+        };
+        let mut change_tuples_events = [(
+            ChangeTag::Delete,
+            VecDeque::from([
+                Event {
+                    event_type: EventType::CallFrom,
+                    detail: "strbuf_init at strbuf.c:57:2\n".to_owned(),
+                },
+                Event {
+                    event_type: EventType::CallTo,
+                    detail: "Jump to external code\n".to_owned(),
+                },
+                Event {
+                    event_type: EventType::CallFrom,
+                    detail: "Jump to external code\n".to_owned(),
+                },
+                Event {
+                    event_type: EventType::CallTo,
+                    detail: "External code\n".to_owned(),
+                },
+                Event {
+                    event_type: EventType::ReturnFrom,
+                    detail: "Jump to external code\n".to_owned(),
+                },
+            ]),
+        )];
+        let divergences = check_for_known_divergences(&op, &mut change_tuples_events);
+        assert_eq!(divergences.len(), 1);
+        let divergence = &divergences[0];
+        assert_eq!(divergence.divergence_type, DivergenceType::RemovedLibraryCall);
+        assert_eq!(divergence.events.len(), 5);
+    }
+}
