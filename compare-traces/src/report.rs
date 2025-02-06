@@ -172,8 +172,8 @@ fn check_for_known_divergences(
     let mut divergences = vec![];
 
     if log_enabled!(log::Level::Debug) {
-        println!("{:?}", op);
-        println!("{:?}", change_tuples_events);
+        println!("{:#?}", op);
+        println!("{:#?}", change_tuples_events);
         println!();
     }
 
@@ -247,7 +247,7 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
             let new_divergences = check_for_known_divergences(&op, &mut change_tuples_events);
             for divergence in &new_divergences {
                 if log_enabled!(log::Level::Debug) {
-                    println!("{:?}", divergence);
+                    println!("{:#?}", divergence);
                     println!();
                 }
 
