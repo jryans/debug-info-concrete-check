@@ -87,6 +87,8 @@ enum DivergenceType {
     CoordinatesRemoved,
     CoordinatesChanged,
     LibraryCallRemoved,
+    // TODO: Refine this by pass, similar to the paper
+    ProgramCallRemoved,
     Unknown,
 }
 
@@ -269,6 +271,53 @@ fn check_for_library_call_removed(
     })
 }
 
+// Example diff:
+// - CF: is_absolute_path at cache.h:1276:32
+// -   CT: git_has_dos_drive_prefix at git-compat-util.h:432:0
+// -   RF: git_has_dos_drive_prefix at git-compat-util.h:433:2
+fn check_for_program_call_removed(
+    op: &DiffOp,
+    change_tuples_events: &mut [(ChangeTag, VecDeque<Event>)],
+) -> Option<Divergence> {
+    // Diff op for this region should be delete
+    if op.tag() != DiffTag::Delete {
+        return None;
+    }
+
+    // Should have a single tuple with deleted lines
+    assert!(change_tuples_events.len() == 1);
+    let (change_tag, events) = &mut change_tuples_events[0];
+    assert!(*change_tag == ChangeTag::Delete);
+
+    // Must have at least 3 events
+    if events.len() < 3 {
+        return None;
+    }
+
+    // Event sequence should be call from, call to, return from
+    // TODO: Support more complex trees with nested calls
+    if events[0].event_type != EventType::CallFrom {
+        return None;
+    }
+    if events[1].event_type != EventType::CallTo {
+        return None;
+    }
+    if events[2].event_type != EventType::ReturnFrom {
+        return None;
+    }
+
+    // Extract related events
+    let mut related_events = vec![];
+    related_events.push(events.pop_front().unwrap());
+    related_events.push(events.pop_front().unwrap());
+    related_events.push(events.pop_front().unwrap());
+
+    Some(Divergence {
+        divergence_type: DivergenceType::ProgramCallRemoved,
+        events: related_events,
+    })
+}
+
 fn check_for_known_divergences(
     op: &DiffOp,
     change_tuples_events: &mut [(ChangeTag, VecDeque<Event>)],
@@ -294,6 +343,10 @@ fn check_for_known_divergences(
             continue_checking = true;
         }
         if let Some(divergence) = check_for_library_call_removed(op, change_tuples_events) {
+            divergences.push(divergence);
+            continue_checking = true;
+        }
+        if let Some(divergence) = check_for_program_call_removed(op, change_tuples_events) {
             divergences.push(divergence);
             continue_checking = true;
         }
@@ -565,5 +618,34 @@ mod tests {
             );
             assert_eq!(divergence.events.len(), 5);
         }
+    }
+
+    #[test]
+    fn program_call_removed() {
+        // Example diff:
+        // - CF: is_absolute_path at cache.h:1276:32
+        // -   CT: git_has_dos_drive_prefix at git-compat-util.h:432:0
+        // -   RF: git_has_dos_drive_prefix at git-compat-util.h:433:2
+        let op = DiffOp::Delete {
+            old_index: 75,
+            old_len: 3,
+            new_index: 72,
+        };
+        let mut change_tuples_events = [(
+            ChangeTag::Delete,
+            VecDeque::from([
+                Event::parse("CF: is_absolute_path at cache.h:1276:32").unwrap(),
+                Event::parse("CT: git_has_dos_drive_prefix at git-compat-util.h:432:0").unwrap(),
+                Event::parse("RF: git_has_dos_drive_prefix at git-compat-util.h:433:2").unwrap(),
+            ]),
+        )];
+        let divergences = check_for_known_divergences(&op, &mut change_tuples_events);
+        assert_eq!(divergences.len(), 1);
+        let divergence = &divergences[0];
+        assert_eq!(
+            divergence.divergence_type,
+            DivergenceType::ProgramCallRemoved
+        );
+        assert_eq!(divergence.events.len(), 3);
     }
 }
