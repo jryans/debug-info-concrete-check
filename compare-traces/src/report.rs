@@ -1,4 +1,7 @@
-use std::{collections::{HashMap, VecDeque}, hash::Hash};
+use std::{
+    collections::{HashMap, VecDeque},
+    hash::Hash,
+};
 
 use anyhow::{anyhow, Ok, Result};
 use log::log_enabled;
@@ -67,7 +70,8 @@ struct Divergence {
 impl Divergence {
     fn call_site(&self) -> &str {
         assert!(!self.events.is_empty());
-        assert!(self.events[0].event_type == EventType::CallFrom);
+        // TODO: If we don't have a `CallFrom` as the first event, walk back until we find it
+        // assert!(self.events[0].event_type == EventType::CallFrom);
         &self.events[0].detail
     }
 }
@@ -157,6 +161,22 @@ fn check_for_known_divergences(
         }
     }
 
+    // If any events remain, record an unknown divergence
+    if change_tuples_events
+        .iter()
+        .any(|(_tag, events)| !events.is_empty())
+    {
+        // TODO: Keep events separated by tuple...?
+        let mut merged_events = vec![];
+        for (_tag, events) in change_tuples_events {
+            merged_events.append(&mut events.drain(..).collect::<Vec<_>>());
+        }
+        divergences.push(Divergence {
+            divergence_type: DivergenceType::Unknown,
+            events: merged_events,
+        });
+    }
+
     divergences
 }
 
@@ -228,7 +248,8 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
         println!("  Call site:   {}", divergence.call_site());
         println!("  Occurrences: {}", occurrences);
         println!();
-        if let Some(count) = divergence_call_site_count_by_type.get_mut(&divergence.divergence_type) {
+        if let Some(count) = divergence_call_site_count_by_type.get_mut(&divergence.divergence_type)
+        {
             *count += 1;
         } else {
             divergence_call_site_count_by_type.insert(divergence.divergence_type.clone(), 1);
@@ -248,7 +269,10 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
     println!("## Summary");
     println!();
 
-    println!("{} divergence call sites", divergence_stats_by_call_site.len());
+    println!(
+        "{} divergence call sites",
+        divergence_stats_by_call_site.len()
+    );
     println!("{} divergence occurrences", occurrences_total);
 }
 
