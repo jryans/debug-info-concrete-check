@@ -22,6 +22,10 @@ struct Event {
     event_type: EventType,
     // TODO: Maybe store reference instead...?
     detail: String,
+    function: Option<String>,
+    file: Option<String>,
+    line: Option<u64>,
+    column: Option<u64>,
 }
 
 impl Event {
@@ -48,10 +52,33 @@ impl Event {
         // Advance past event type and ": " separator
         rest = &rest[4..];
 
-        // For now, just stash the rest as event detail
+        // Stash the rest as event detail
         let detail = rest.trim_end().to_owned();
 
-        Ok(Self { event_type, detail })
+        // Attempt to parse coordinates further if present
+        let mut function = None;
+        let mut file = None;
+        let mut line = None;
+        let mut column = None;
+        if rest.contains(" at ") {
+            // Example: getnanotime at trace.c:397:18
+            // Function and file should always be present, but line and column may not be
+            let mut segments = rest.split_ascii_whitespace();
+            function = segments.next().map(|s| s.to_owned());
+            let mut components = segments.nth(1).unwrap().split(':');
+            file = components.next().map(|s| s.to_owned());
+            line = components.next().map(|s| s.parse::<u64>().unwrap());
+            column = components.next().map(|s| s.parse::<u64>().unwrap());
+        }
+
+        Ok(Self {
+            event_type,
+            detail,
+            function,
+            file,
+            line,
+            column,
+        })
     }
 }
 
@@ -296,26 +323,11 @@ mod tests {
         let mut change_tuples_events = [(
             ChangeTag::Delete,
             VecDeque::from([
-                Event {
-                    event_type: EventType::CallFrom,
-                    detail: "strbuf_init at strbuf.c:57:2".to_owned(),
-                },
-                Event {
-                    event_type: EventType::CallTo,
-                    detail: "Jump to external code".to_owned(),
-                },
-                Event {
-                    event_type: EventType::CallFrom,
-                    detail: "Jump to external code".to_owned(),
-                },
-                Event {
-                    event_type: EventType::CallTo,
-                    detail: "External code".to_owned(),
-                },
-                Event {
-                    event_type: EventType::ReturnFrom,
-                    detail: "Jump to external code".to_owned(),
-                },
+                Event::parse("CF: strbuf_init at strbuf.c:57:2").unwrap(),
+                Event::parse("CT: Jump to external code").unwrap(),
+                Event::parse("CF: Jump to external code").unwrap(),
+                Event::parse("CT: External code").unwrap(),
+                Event::parse("RF: Jump to external code").unwrap(),
             ]),
         )];
         let divergences = check_for_known_divergences(&op, &mut change_tuples_events);
@@ -349,46 +361,16 @@ mod tests {
         let mut change_tuples_events = [(
             ChangeTag::Delete,
             VecDeque::from([
-                Event {
-                    event_type: EventType::CallFrom,
-                    detail: "init_repository_format at setup.c:710:33".to_owned(),
-                },
-                Event {
-                    event_type: EventType::CallTo,
-                    detail: "Jump to external code".to_owned(),
-                },
-                Event {
-                    event_type: EventType::CallFrom,
-                    detail: "Jump to external code".to_owned(),
-                },
-                Event {
-                    event_type: EventType::CallTo,
-                    detail: "External code".to_owned(),
-                },
-                Event {
-                    event_type: EventType::ReturnFrom,
-                    detail: "Jump to external code".to_owned(),
-                },
-                Event {
-                    event_type: EventType::CallFrom,
-                    detail: "init_repository_format at setup.c:712:2".to_owned(),
-                },
-                Event {
-                    event_type: EventType::CallTo,
-                    detail: "Jump to external code".to_owned(),
-                },
-                Event {
-                    event_type: EventType::CallFrom,
-                    detail: "Jump to external code".to_owned(),
-                },
-                Event {
-                    event_type: EventType::CallTo,
-                    detail: "External code".to_owned(),
-                },
-                Event {
-                    event_type: EventType::ReturnFrom,
-                    detail: "Jump to external code".to_owned(),
-                },
+                Event::parse("CF: init_repository_format at setup.c:710:33").unwrap(),
+                Event::parse("CT: Jump to external code").unwrap(),
+                Event::parse("CF: Jump to external code").unwrap(),
+                Event::parse("CT: External code").unwrap(),
+                Event::parse("RF: Jump to external code").unwrap(),
+                Event::parse("CF: init_repository_format at setup.c:712:2").unwrap(),
+                Event::parse("CT: Jump to external code").unwrap(),
+                Event::parse("CF: Jump to external code").unwrap(),
+                Event::parse("CT: External code").unwrap(),
+                Event::parse("RF: Jump to external code").unwrap(),
             ]),
         )];
         let divergences = check_for_known_divergences(&op, &mut change_tuples_events);
