@@ -57,7 +57,7 @@ impl Event {
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 enum DivergenceType {
-    RemovedLibraryCall,
+    LibraryCallRemoved,
     Unknown,
 }
 
@@ -81,7 +81,7 @@ impl Divergence {
 // -   CF: Jump to external code
 // -     CT: External code
 // -   RF: Jump to external code
-fn check_for_removed_library_call(
+fn check_for_library_call_removed(
     op: &DiffOp,
     change_tuples_events: &mut [(ChangeTag, VecDeque<Event>)],
 ) -> Option<Divergence> {
@@ -133,7 +133,7 @@ fn check_for_removed_library_call(
     }
 
     Some(Divergence {
-        divergence_type: DivergenceType::RemovedLibraryCall,
+        divergence_type: DivergenceType::LibraryCallRemoved,
         events: related_events,
     })
 }
@@ -154,7 +154,7 @@ fn check_for_known_divergences(
     let mut continue_checking = true;
     while continue_checking {
         continue_checking = false;
-        if let Some(divergence) = check_for_removed_library_call(op, change_tuples_events) {
+        if let Some(divergence) = check_for_library_call_removed(op, change_tuples_events) {
             divergences.push(divergence);
             continue_checking = true;
         }
@@ -281,7 +281,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn removed_library_call_single() {
+    fn library_call_removed_single() {
         // Example diff:
         // - CF: strbuf_init at strbuf.c:57:2
         // -   CT: Jump to external code
@@ -323,13 +323,13 @@ mod tests {
         let divergence = &divergences[0];
         assert_eq!(
             divergence.divergence_type,
-            DivergenceType::RemovedLibraryCall
+            DivergenceType::LibraryCallRemoved
         );
         assert_eq!(divergence.events.len(), 5);
     }
 
     #[test]
-    fn removed_library_call_multiple() {
+    fn library_call_removed_multiple() {
         // Example diff:
         // - CF: init_repository_format at setup.c:710:33
         // -   CT: Jump to external code
@@ -396,7 +396,7 @@ mod tests {
         for divergence in &divergences {
             assert_eq!(
                 divergence.divergence_type,
-                DivergenceType::RemovedLibraryCall
+                DivergenceType::LibraryCallRemoved
             );
             assert_eq!(divergence.events.len(), 5);
         }
