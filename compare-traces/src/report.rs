@@ -68,10 +68,9 @@ struct Divergence {
 }
 
 impl Divergence {
-    fn call_site(&self) -> &str {
+    fn coordinates(&self) -> &str {
         assert!(!self.events.is_empty());
-        // TODO: If we don't have a `CallFrom` as the first event, walk back until we find it
-        // assert!(self.events[0].event_type == EventType::CallFrom);
+        // Use first event to provide approximate coordinates for divergence
         &self.events[0].detail
     }
 }
@@ -184,7 +183,7 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
     println!("Analysing divergences…");
     println!();
 
-    let mut divergence_stats_by_call_site: HashMap<Divergence, u64> = HashMap::new();
+    let mut divergence_stats_by_coordinates: HashMap<Divergence, u64> = HashMap::new();
 
     for op_group in diff.grouped_ops(0) {
         for op in op_group {
@@ -225,11 +224,11 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
                     println!();
                 }
 
-                // Insert or update stats for this call site
-                if let Some(occurrences) = divergence_stats_by_call_site.get_mut(divergence) {
+                // Insert or update stats for these source coordinates
+                if let Some(occurrences) = divergence_stats_by_coordinates.get_mut(divergence) {
                     *occurrences += 1;
                 } else {
-                    divergence_stats_by_call_site.insert(divergence.clone(), 1);
+                    divergence_stats_by_coordinates.insert(divergence.clone(), 1);
                 }
             }
         }
@@ -238,31 +237,32 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
     println!("Divergence analysis complete!");
     println!();
 
-    println!("## Divergences by call site");
+    println!("## Divergences by source coordinates");
     println!();
 
-    let mut divergence_call_site_count_by_type: HashMap<DivergenceType, u64> = HashMap::new();
+    let mut divergence_coordinates_count_by_type: HashMap<DivergenceType, u64> = HashMap::new();
     let mut occurrences_total: u64 = 0;
-    for (divergence, occurrences) in &divergence_stats_by_call_site {
+    for (divergence, occurrences) in &divergence_stats_by_coordinates {
         println!("{:?}", divergence.divergence_type);
-        println!("  Call site:   {}", divergence.call_site());
+        println!("  Coordinates: {}", divergence.coordinates());
         println!("  Occurrences: {}", occurrences);
         println!();
-        if let Some(count) = divergence_call_site_count_by_type.get_mut(&divergence.divergence_type)
+        if let Some(count) =
+            divergence_coordinates_count_by_type.get_mut(&divergence.divergence_type)
         {
             *count += 1;
         } else {
-            divergence_call_site_count_by_type.insert(divergence.divergence_type.clone(), 1);
+            divergence_coordinates_count_by_type.insert(divergence.divergence_type.clone(), 1);
         }
         occurrences_total += occurrences;
     }
 
-    println!("## Call sites by divergence type");
+    println!("## Divergences with unique coordinates by type");
     println!();
 
-    for (divergence_type, count) in &divergence_call_site_count_by_type {
+    for (divergence_type, count) in &divergence_coordinates_count_by_type {
         println!("{:?}", divergence_type);
-        println!("  Call sites:  {}", count);
+        println!("  Unique divergence coordinates: {}", count);
         println!();
     }
 
@@ -270,8 +270,8 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
     println!();
 
     println!(
-        "{} divergence call sites",
-        divergence_stats_by_call_site.len()
+        "{} unique divergence coordinates",
+        divergence_stats_by_coordinates.len()
     );
     println!("{} divergence occurrences", occurrences_total);
 }
