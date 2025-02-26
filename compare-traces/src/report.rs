@@ -7,7 +7,7 @@ use anyhow::{anyhow, Ok, Result};
 use log::log_enabled;
 use similar::{ChangeTag, DiffOp, DiffTag, TextDiff};
 
-use crate::diff::print_change;
+use crate::{diff::print_change, remarks::Remark};
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 enum EventType {
@@ -18,14 +18,19 @@ enum EventType {
 }
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
+pub struct Location {
+    pub function: Option<String>,
+    pub file: Option<String>,
+    pub line: Option<u64>,
+    pub column: Option<u64>,
+}
+
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
 struct Event {
     event_type: EventType,
     // TODO: Maybe store reference instead...?
     detail: String,
-    function: Option<String>,
-    file: Option<String>,
-    line: Option<u64>,
-    column: Option<u64>,
+    location: Location,
 }
 
 impl Event {
@@ -74,10 +79,12 @@ impl Event {
         Ok(Self {
             event_type,
             detail,
-            function,
-            file,
-            line,
-            column,
+            location: Location {
+                function,
+                file,
+                line,
+                column,
+            },
         })
     }
 }
@@ -96,13 +103,28 @@ enum DivergenceType {
 struct Divergence {
     divergence_type: DivergenceType,
     events: Vec<Event>,
+    pass_responsible: Option<String>,
 }
 
 impl Divergence {
+    fn new(divergence_type: DivergenceType, events: Vec<Event>) -> Divergence {
+        Divergence {
+            divergence_type,
+            events,
+            pass_responsible: None,
+        }
+    }
+
     fn coordinates(&self) -> &str {
         assert!(!self.events.is_empty());
         // Use first event to provide approximate coordinates for divergence
         &self.events[0].detail
+    }
+
+    fn location(&self) -> &Location {
+        assert!(!self.events.is_empty());
+        // Use first event to provide approximate coordinates for divergence
+        &self.events[0].location
     }
 }
 
@@ -134,15 +156,15 @@ fn check_for_coordinates_removed(
     // Function and file must match
     let before_event = &before_events[0];
     let after_event = &after_events[0];
-    if before_event.function != after_event.function {
+    if before_event.location.function != after_event.location.function {
         return None;
     }
-    if before_event.file != after_event.file {
+    if before_event.location.file != after_event.location.file {
         return None;
     }
 
     // After event must have missing line and column coordinates
-    if after_event.line != Some(0) || after_event.column != Some(0) {
+    if after_event.location.line != Some(0) || after_event.location.column != Some(0) {
         return None;
     }
 
@@ -153,10 +175,10 @@ fn check_for_coordinates_removed(
     related_events.push(before_events.pop_front().unwrap());
     related_events.push(after_events.pop_front().unwrap());
 
-    Some(Divergence {
-        divergence_type: DivergenceType::CoordinatesRemoved,
-        events: related_events,
-    })
+    Some(Divergence::new(
+        DivergenceType::CoordinatesRemoved,
+        related_events,
+    ))
 }
 
 // Example diff:
@@ -187,15 +209,17 @@ fn check_for_coordinates_changed(
     // Function and file must match
     let before_event = &before_events[0];
     let after_event = &after_events[0];
-    if before_event.function != after_event.function {
+    if before_event.location.function != after_event.location.function {
         return None;
     }
-    if before_event.file != after_event.file {
+    if before_event.location.file != after_event.location.file {
         return None;
     }
 
     // Line or column coordinates must differ
-    if before_event.line == after_event.line && before_event.column == after_event.column {
+    if before_event.location.line == after_event.location.line
+        && before_event.location.column == after_event.location.column
+    {
         return None;
     }
 
@@ -206,10 +230,10 @@ fn check_for_coordinates_changed(
     related_events.push(before_events.pop_front().unwrap());
     related_events.push(after_events.pop_front().unwrap());
 
-    Some(Divergence {
-        divergence_type: DivergenceType::CoordinatesChanged,
-        events: related_events,
-    })
+    Some(Divergence::new(
+        DivergenceType::CoordinatesChanged,
+        related_events,
+    ))
 }
 
 // Example diff:
@@ -265,10 +289,10 @@ fn check_for_library_call_removed(
         related_events.push(events.pop_front().unwrap());
     }
 
-    Some(Divergence {
-        divergence_type: DivergenceType::LibraryCallRemoved,
-        events: related_events,
-    })
+    Some(Divergence::new(
+        DivergenceType::LibraryCallRemoved,
+        related_events,
+    ))
 }
 
 // Example diff:
@@ -312,10 +336,10 @@ fn check_for_program_call_removed(
     related_events.push(events.pop_front().unwrap());
     related_events.push(events.pop_front().unwrap());
 
-    Some(Divergence {
-        divergence_type: DivergenceType::ProgramCallRemoved,
-        events: related_events,
-    })
+    Some(Divergence::new(
+        DivergenceType::ProgramCallRemoved,
+        related_events,
+    ))
 }
 
 fn check_for_known_divergences(
@@ -362,16 +386,16 @@ fn check_for_known_divergences(
         for (_tag, events) in change_tuples_events {
             merged_events.append(&mut events.drain(..).collect::<Vec<_>>());
         }
-        divergences.push(Divergence {
-            divergence_type: DivergenceType::Unknown,
-            events: merged_events,
-        });
+        divergences.push(Divergence::new(DivergenceType::Unknown, merged_events));
     }
 
     divergences
 }
 
-pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
+pub fn analyse_and_print_report(
+    diff: &TextDiff<'_, '_, '_, str>,
+    remarks_by_location: &Option<HashMap<Location, Remark>>,
+) {
     println!("Analysing divergences…");
     println!();
 
@@ -409,11 +433,26 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
                 .collect();
 
             // Check events against known divergence patterns
-            let new_divergences = check_for_known_divergences(&op, &mut change_tuples_events);
-            for divergence in &new_divergences {
+            let mut new_divergences = check_for_known_divergences(&op, &mut change_tuples_events);
+            for divergence in &mut new_divergences {
                 if log_enabled!(log::Level::Debug) {
                     println!("{:#?}", divergence);
                     println!();
+                }
+
+                // Look for optimisation remarks at divergence coordinates
+                if let Some(remarks) = remarks_by_location {
+                    // TODO: Enable for other types where possible
+                    if divergence.divergence_type == DivergenceType::ProgramCallRemoved {
+                        if let Some(remark) = remarks.get(divergence.location()) {
+                            if log_enabled!(log::Level::Debug) {
+                                println!("Matching remark: {:#?}", remark);
+                                println!();
+                            }
+                            // Record pass responsible in divergence
+                            divergence.pass_responsible = Some(remark.pass.clone());
+                        }
+                    }
                 }
 
                 // Insert or update stats for these source coordinates
@@ -438,6 +477,9 @@ pub fn analyse_and_print_report(diff: &TextDiff<'_, '_, '_, str>) {
         println!("{:?}", divergence.divergence_type);
         println!("  Coordinates: {}", divergence.coordinates());
         println!("  Occurrences: {}", occurrences);
+        if let Some(pass) = &divergence.pass_responsible {
+            println!("  Pass responsible: {}", pass);
+        }
         println!();
         if let Some(count) =
             divergence_coordinates_count_by_type.get_mut(&divergence.divergence_type)
