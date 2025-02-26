@@ -1,4 +1,8 @@
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Ok, Result};
 // use log::log_enabled;
@@ -104,8 +108,14 @@ pub fn load_remarks(remarks_file: &PathBuf) -> Result<HashMap<Location, Remark>>
         let function = body.get("Function").unwrap().as_str().unwrap().to_owned();
         let location = body.get("DebugLoc").unwrap().as_mapping().unwrap();
         // TODO: Need to consider directories as well
-        // JRS: Maybe strip off parent path components for now...?
-        let file = location.get("File").unwrap().as_str().unwrap().to_owned();
+        // Strip off parent path components for now
+        let file_path = location.get("File").unwrap().as_str().unwrap().to_owned();
+        let file = Path::new(&file_path)
+            .file_name()
+            .unwrap()
+            .to_owned()
+            .into_string()
+            .unwrap();
         let line = location.get("Line").unwrap().as_u64().unwrap();
         let column = location.get("Column").unwrap().as_u64().unwrap();
 
