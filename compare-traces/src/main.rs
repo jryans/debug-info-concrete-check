@@ -50,16 +50,12 @@ fn main() -> Result<()> {
             cli.before_file.display()
         )
     })?;
-    let after_content = fs::read_to_string(&cli.after_file).with_context(|| {
-        format!(
-            "Unable to read after trace ({})",
-            cli.after_file.display()
-        )
-    })?;
+    let after_content = fs::read_to_string(&cli.after_file)
+        .with_context(|| format!("Unable to read after trace ({})", cli.after_file.display()))?;
 
     let diff = TextDiff::configure()
         .algorithm(similar::Algorithm::Patience)
-        .diff_lines(&before_content,&after_content);
+        .diff_lines(&before_content, &after_content);
 
     if cli.diff {
         print_diff(&diff);
