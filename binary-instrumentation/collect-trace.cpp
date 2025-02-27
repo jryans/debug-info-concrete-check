@@ -21,6 +21,7 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ErrorOr.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
@@ -35,6 +36,7 @@ namespace {
 
 QBDI::rword mainFunc;
 
+bool append = false;
 bool verbose = false;
 bool printSource = false;
 bool printLocation = true;
@@ -739,6 +741,8 @@ int qbdipreload_on_premain(void *gprCtx, void *fpuCtx) {
 }
 
 int qbdipreload_on_main(int argc, char **argv) {
+  if (std::getenv("CON_TRACE_APPEND"))
+    append = true;
   if (std::getenv("CON_TRACE_VERBOSE"))
     verbose = true;
   if (std::getenv("CON_TRACE_SOURCE"))
@@ -769,7 +773,8 @@ int qbdipreload_on_run(QBDI::VMInstanceRef vm, QBDI::rword start,
                        QBDI::rword stop) {
   std::error_code error;
   auto traceName = verbose ? "trace-verbose" : "trace";
-  trace = std::make_unique<raw_fd_ostream>(traceName, error);
+  trace = std::make_unique<raw_fd_ostream>(
+      traceName, error, append ? sys::fs::OF_Append : sys::fs::OF_None);
   if (error) {
     errs() << "Error: Unable to open trace file\n";
     return QBDIPRELOAD_ERR_STARTUP_FAILED;
