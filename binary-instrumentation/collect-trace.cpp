@@ -9,6 +9,9 @@
 #include <utility>
 #include <vector>
 
+#include <sys/types.h>
+#include <unistd.h>
+
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
@@ -23,6 +26,7 @@
 #include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -771,8 +775,12 @@ int qbdipreload_on_main(int argc, char **argv) {
 
 int qbdipreload_on_run(QBDI::VMInstanceRef vm, QBDI::rword start,
                        QBDI::rword stop) {
+  // Use process IDs in trace file name in case of process forks
+  auto pid = getpid();
+  auto ppid = getppid();
+  auto traceBase = verbose ? "trace-verbose" : "trace";
+  auto traceName = formatv("{0}-{1}-{2}", traceBase, ppid, pid).str();
   std::error_code error;
-  auto traceName = verbose ? "trace-verbose" : "trace";
   trace = std::make_unique<raw_fd_ostream>(
       traceName, error, append ? sys::fs::OF_Append : sys::fs::OF_None);
   if (error) {
