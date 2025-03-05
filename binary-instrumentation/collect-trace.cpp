@@ -261,6 +261,9 @@ void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
       *trace << "🔔 No info for this address";
   }
   *trace << "\n";
+  // Flush after each event to avoid trace corruption due to context switching
+  // caused by threads, signals, etc.
+  trace->flush();
 }
 
 void printCallFromEventForInlinedEntry(const DWARFDie &entry) {
