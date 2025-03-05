@@ -167,24 +167,24 @@ enum struct EventType {
   Verbose,
 };
 
-inline raw_ostream &operator<<(raw_ostream &trace, const EventType &type) {
+inline raw_ostream &operator<<(raw_ostream &stream, const EventType &type) {
   switch (type) {
   case EventType::CallFrom:
-    trace << "CF";
+    stream << "CF";
     break;
   case EventType::CallTo:
-    trace << "CT";
+    stream << "CT";
     break;
   case EventType::ReturnFrom:
-    trace << "RF";
+    stream << "RF";
     break;
   case EventType::Verbose:
-    trace << "V";
+    stream << "V";
     break;
   default:
     llvm_unreachable("Unexpected EventType");
   }
-  return trace;
+  return stream;
 }
 
 enum struct EventSource {
