@@ -5,6 +5,8 @@ use std::{
 
 use anyhow::{anyhow, Ok, Result};
 use log::log_enabled;
+use once_cell::sync::Lazy;
+use regex::Regex;
 use similar::{ChangeTag, DiffOp, DiffTag, TextDiff};
 
 use crate::{diff::print_change, remarks::Remark};
@@ -52,10 +54,16 @@ impl Event {
             "CF" => EventType::CallFrom,
             "CT" => EventType::CallTo,
             "RF" => EventType::ReturnFrom,
-            _ => return Err(anyhow!("Unexpected event type {}", event_type_str)),
+            _ => return Err(anyhow!("Unexpected event type: `{}`", event_type_str)),
         };
         // Advance past event type and ": " separator
         rest = &rest[4..];
+
+        // Check for corrupt lines containing multiple events
+        static EVENT_TYPES_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(CF|CT|RF):").unwrap());
+        if EVENT_TYPES_RE.is_match(rest) {
+            return Err(anyhow!("Corrupt event: `{}`", event_str.trim()));
+        }
 
         // Stash the rest as event detail
         let detail = rest.trim_end().to_owned();
@@ -419,6 +427,7 @@ pub fn analyse_and_print_report(
             }
 
             // Parse raw text into events
+            let mut parse_errors = vec![];
             let mut change_tuples_events: Vec<_> = change_tuples_strings
                 .iter()
                 .map(|(tag, strings)| {
@@ -426,11 +435,16 @@ pub fn analyse_and_print_report(
                         tag.clone(),
                         strings
                             .iter()
-                            .map(|str| Event::parse(str).unwrap())
+                            .map(|str| Event::parse(str))
+                            .filter_map(|r| r.map_err(|e| parse_errors.push(e)).ok())
                             .collect::<VecDeque<_>>(),
                     )
                 })
                 .collect();
+            for error in parse_errors {
+                println!("{}", error);
+                println!();
+            }
 
             // Check events against known divergence patterns
             let mut new_divergences = check_for_known_divergences(&op, &mut change_tuples_events);
@@ -513,6 +527,13 @@ pub fn analyse_and_print_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_error() {
+        let result = Event::parse("RF: do_xmalloc at     CT: External code");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Corrupt event"));
+    }
 
     #[test]
     fn coordinates_removed() {
