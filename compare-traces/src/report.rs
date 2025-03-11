@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     hash::Hash,
 };
 
@@ -11,7 +11,7 @@ use similar::{ChangeTag, DiffOp, DiffTag, TextDiff};
 
 use crate::{diff::print_change, remarks::Remark};
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 enum EventType {
     CallFrom,
     CallTo,
@@ -19,7 +19,7 @@ enum EventType {
     // Verbose,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
 pub struct Location {
     pub function: Option<String>,
     pub file: Option<String>,
@@ -27,7 +27,7 @@ pub struct Location {
     pub column: Option<u64>,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
 struct Event {
     event_type: EventType,
     // TODO: Maybe store reference instead...?
@@ -97,7 +97,7 @@ impl Event {
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 enum DivergenceType {
     CoordinatesRemoved,
     CoordinatesChanged,
@@ -107,7 +107,7 @@ enum DivergenceType {
     Unknown,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
 struct Divergence {
     divergence_type: DivergenceType,
     events: Vec<Event>,
@@ -407,7 +407,7 @@ pub fn analyse_and_print_report(
     println!("Analysing divergences…");
     println!();
 
-    let mut divergence_stats_by_coordinates: HashMap<Divergence, u64> = HashMap::new();
+    let mut divergence_stats_by_coordinates: BTreeMap<Divergence, u64> = BTreeMap::new();
 
     for op_group in diff.grouped_ops(0) {
         for op in op_group {
@@ -485,7 +485,7 @@ pub fn analyse_and_print_report(
     println!("## Divergences by source coordinates");
     println!();
 
-    let mut divergence_coordinates_count_by_type: HashMap<DivergenceType, u64> = HashMap::new();
+    let mut divergence_coordinates_count_by_type: BTreeMap<DivergenceType, u64> = BTreeMap::new();
     let mut occurrences_total: u64 = 0;
     for (divergence, occurrences) in &divergence_stats_by_coordinates {
         println!("{:?}", divergence.divergence_type);
