@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
+    fmt::Display,
     hash::Hash,
 };
 
@@ -17,6 +18,17 @@ enum EventType {
     CallTo,
     ReturnFrom,
     // Verbose,
+}
+
+impl Display for EventType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let abbreviation = match self {
+            EventType::CallFrom => "CF",
+            EventType::CallTo => "CT",
+            EventType::ReturnFrom => "RF",
+        };
+        write!(f, "{}", abbreviation)
+    }
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
@@ -97,6 +109,12 @@ impl Event {
     }
 }
 
+impl Display for Event {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.event_type, self.detail)
+    }
+}
+
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 enum DivergenceType {
     CoordinatesRemoved,
@@ -121,12 +139,6 @@ impl Divergence {
             events,
             pass_responsible: None,
         }
-    }
-
-    fn coordinates(&self) -> &str {
-        assert!(!self.events.is_empty());
-        // Use first event to provide approximate coordinates for divergence
-        &self.events[0].detail
     }
 
     fn location(&self) -> &Location {
@@ -489,7 +501,10 @@ pub fn analyse_and_print_report(
     let mut occurrences_total: u64 = 0;
     for (divergence, occurrences) in &divergence_stats_by_coordinates {
         println!("{:?}", divergence.divergence_type);
-        println!("  Coordinates: {}", divergence.coordinates());
+        println!("  Events:");
+        for event in &divergence.events {
+            println!("    {}", event);
+        }
         println!("  Occurrences: {}", occurrences);
         if let Some(pass) = &divergence.pass_responsible {
             println!("  Pass responsible: {}", pass);
