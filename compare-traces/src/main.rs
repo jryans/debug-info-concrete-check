@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::{fs, path::PathBuf};
 
-use anyhow::{Context, Ok, Result};
+use anyhow::{anyhow, Context, Ok, Result};
 use clap::Parser;
 use similar::TextDiff;
 
 use crate::diff::print_diff;
-use crate::remarks::{Remark, load_remarks};
-use crate::report::{Location, analyse_and_print_report};
+use crate::remarks::{load_remarks, Remark};
+use crate::report::{analyse_and_print_report, print_events_by_type, Location};
 
 mod diff;
 mod remarks;
@@ -25,9 +25,9 @@ struct Cli {
     #[arg(long = "remarks")]
     remarks_file: Option<PathBuf>,
 
-    /// Whether to use terminal colors
+    /// Record events found in each divergence category
     #[arg(long)]
-    color: Option<bool>,
+    events_by_type_dir: Option<PathBuf>,
 
     /// Show trace diff
     #[arg(long)]
@@ -39,6 +39,10 @@ struct Cli {
 
     #[command(flatten)]
     verbose: clap_verbosity_flag::Verbosity,
+
+    /// Whether to use terminal colors
+    #[arg(long)]
+    color: Option<bool>,
 }
 
 fn main() -> Result<()> {
@@ -75,7 +79,16 @@ fn main() -> Result<()> {
     }
 
     if cli.report {
-        analyse_and_print_report(&diff, &remarks_by_location);
+        let divergence_stats_by_coordinates = analyse_and_print_report(&diff, &remarks_by_location);
+        if let Some(events_by_type_dir) = cli.events_by_type_dir {
+            if !events_by_type_dir.is_dir() {
+                return Err(anyhow!(
+                    "Events by type path `{}` is not a directory",
+                    events_by_type_dir.display(),
+                ));
+            }
+            print_events_by_type(&divergence_stats_by_coordinates, &events_by_type_dir)?;
+        }
     }
 
     Ok(())

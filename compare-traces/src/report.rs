@@ -1,10 +1,14 @@
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     fmt::Display,
+    fs::File,
     hash::Hash,
+    io::Write,
+    path::PathBuf,
 };
 
-use anyhow::{anyhow, Ok, Result};
+use anyhow::{anyhow, Context, Ok, Result};
+use enum_iterator::Sequence;
 use log::log_enabled;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -115,7 +119,7 @@ impl Display for Event {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+#[derive(Sequence, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 enum DivergenceType {
     CoordinatesRemoved,
     CoordinatesChanged,
@@ -125,8 +129,20 @@ enum DivergenceType {
     Unknown,
 }
 
+impl DivergenceType {
+    fn to_file_name(&self) -> &str {
+        match self {
+            DivergenceType::CoordinatesRemoved => "coordinates-removed",
+            DivergenceType::CoordinatesChanged => "coordinates-changed",
+            DivergenceType::LibraryCallRemoved => "library-call-removed",
+            DivergenceType::ProgramCallRemoved => "program-call-removed",
+            DivergenceType::Unknown => "unknown",
+        }
+    }
+}
+
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
-struct Divergence {
+pub struct Divergence {
     divergence_type: DivergenceType,
     events: Vec<Event>,
     pass_responsible: Option<String>,
@@ -430,7 +446,7 @@ fn tweak_alignment(op: &DiffOp, change_tuples_strings: &mut [(ChangeTag, Vec<&st
 pub fn analyse_and_print_report(
     diff: &TextDiff<'_, '_, '_, str>,
     remarks_by_location: &Option<HashMap<Location, Remark>>,
-) {
+) -> BTreeMap<Divergence, u64> {
     println!("Analysing divergences…");
     println!();
 
@@ -556,6 +572,34 @@ pub fn analyse_and_print_report(
         divergence_stats_by_coordinates.len()
     );
     println!("{} divergence occurrences", occurrences_total);
+
+    divergence_stats_by_coordinates
+}
+
+pub fn print_events_by_type(
+    divergence_stats_by_coordinates: &BTreeMap<Divergence, u64>,
+    events_by_type_dir: &PathBuf,
+) -> Result<()> {
+    let mut files_by_type: HashMap<DivergenceType, File> = HashMap::new();
+    for divergence_type in enum_iterator::all::<DivergenceType>() {
+        let file_path = events_by_type_dir.join(divergence_type.to_file_name());
+        let file = File::create(&file_path).with_context(|| {
+            format!(
+                "Unable to create events by type file ({})",
+                file_path.display()
+            )
+        })?;
+        files_by_type.insert(divergence_type, file);
+    }
+
+    for divergence in divergence_stats_by_coordinates.keys() {
+        let mut file = &files_by_type[&divergence.divergence_type];
+        for event in &divergence.events {
+            writeln!(file, "{}", event)?;
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
