@@ -10,7 +10,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use similar::{ChangeTag, DiffOp, DiffTag, TextDiff};
 
-use crate::{diff::print_change, remarks::Remark};
+use crate::{diff::print_change_vec, remarks::Remark};
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 enum EventType {
@@ -412,6 +412,21 @@ fn check_for_known_divergences(
     divergences
 }
 
+fn tweak_alignment(op: &DiffOp, change_tuples_strings: &mut [(ChangeTag, Vec<&str>)]) {
+    if op.tag() == DiffTag::Delete && change_tuples_strings.len() == 1 {
+        let change_strings = &change_tuples_strings[0].1;
+        let first_string = *change_strings.first().unwrap();
+        let last_string = *change_strings.last().unwrap();
+        // Highly likely that the external code lines also appear after the call from event
+        if first_string.to_lowercase().contains("external code") && last_string.contains("CF:") {
+            let mut change_strings_reordered = vec![last_string];
+            let last_string_index = change_strings.len() - 1;
+            change_strings_reordered.extend_from_slice(&change_strings[..(last_string_index - 1)]);
+            change_tuples_strings[0].1 = change_strings_reordered;
+        }
+    }
+}
+
 pub fn analyse_and_print_report(
     diff: &TextDiff<'_, '_, '_, str>,
     remarks_by_location: &Option<HashMap<Location, Remark>>,
@@ -428,13 +443,17 @@ pub fn analyse_and_print_report(
                 continue;
             }
 
-            // TODO: Skip unnecessary collects
-            let change_tuples_strings: Vec<_> = op
+            // TODO: Skip unnecessary collects / copies
+            let mut change_tuples_strings: Vec<_> = op
                 .iter_slices(diff.old_slices(), diff.new_slices())
+                .map(|(tag, slices)| (tag, Vec::from(slices)))
                 .collect();
 
+            // Fix up alignment where possible
+            tweak_alignment(&op, &mut change_tuples_strings);
+
             if log_enabled!(log::Level::Debug) {
-                print_change(&op, &change_tuples_strings);
+                print_change_vec(&op, &change_tuples_strings);
                 println!();
             }
 
