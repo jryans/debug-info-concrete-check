@@ -431,14 +431,19 @@ fn check_for_known_divergences(
 fn tweak_alignment(op: &DiffOp, change_tuples_strings: &mut [(ChangeTag, Vec<&str>)]) {
     if op.tag() == DiffTag::Delete && change_tuples_strings.len() == 1 {
         let change_strings = &change_tuples_strings[0].1;
-        let first_string = *change_strings.first().unwrap();
-        let last_string = *change_strings.last().unwrap();
-        // Highly likely that the external code lines also appear after the call from event
-        if first_string.to_lowercase().contains("external code") && last_string.contains("CF:") {
-            let mut change_strings_reordered = vec![last_string];
-            let last_string_index = change_strings.len() - 1;
-            change_strings_reordered.extend_from_slice(&change_strings[..(last_string_index - 1)]);
-            change_tuples_strings[0].1 = change_strings_reordered;
+        if change_strings.len() > 1 {
+            let first_string = *change_strings.first().unwrap();
+            let last_string = *change_strings.last().unwrap();
+
+            // Highly likely that the external code lines also appear after the call from event
+            if first_string.to_lowercase().contains("external code") && last_string.contains("CF:")
+            {
+                let mut change_strings_reordered = vec![last_string];
+                let last_string_index = change_strings.len() - 1;
+                change_strings_reordered
+                    .extend_from_slice(&change_strings[..(last_string_index - 1)]);
+                change_tuples_strings[0].1 = change_strings_reordered;
+            }
         }
     }
 }
