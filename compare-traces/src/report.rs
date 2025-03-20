@@ -134,6 +134,7 @@ impl Display for Event {
 enum DivergenceType {
     CoordinatesRemoved,
     CoordinatesChanged,
+    TailCallWithoutInfo,
     LibraryCallRemoved,
     // TODO: Refine this by pass, similar to the paper
     ProgramCallRemoved,
@@ -145,6 +146,7 @@ impl DivergenceType {
         match self {
             DivergenceType::CoordinatesRemoved => "coordinates-removed",
             DivergenceType::CoordinatesChanged => "coordinates-changed",
+            DivergenceType::TailCallWithoutInfo => "tail-call-without-info",
             DivergenceType::LibraryCallRemoved => "library-call-removed",
             DivergenceType::ProgramCallRemoved => "program-call-removed",
             DivergenceType::Uncategorised => "uncategorised",
@@ -173,6 +175,59 @@ impl Divergence {
         // Use first event to provide approximate coordinates for divergence
         &self.events[0].location
     }
+}
+
+// Example diff:
+// < CT: xstrdup_or_null at git-compat-util.h:1168:0
+// > CT: xstrdup_or_null at git-compat-util.h:1168:0 (TWCI)
+fn check_for_tail_call_without_info(
+    op: &DiffOp,
+    change_tuples_events: &mut [(ChangeTag, VecDeque<Event>)],
+) -> Option<Divergence> {
+    // Diff op for this region should be replace
+    if op.tag() != DiffTag::Replace {
+        return None;
+    }
+
+    // Should have two tuples with deleted and inserted lines
+    assert!(change_tuples_events.len() == 2);
+    let (befores, afters) = change_tuples_events.split_at_mut(1);
+    let (before_change_tag, before_events) = &mut befores[0];
+    let (after_change_tag, after_events) = &mut afters[0];
+    assert!(*before_change_tag == ChangeTag::Delete);
+    assert!(*after_change_tag == ChangeTag::Insert);
+
+    // Must have at least one event on both sides
+    if before_events.len() < 1 || after_events.len() < 1 {
+        return None;
+    }
+
+    // Function and file must match
+    let before_event = &before_events[0];
+    let after_event = &after_events[0];
+    if before_event.location.function != after_event.location.function {
+        return None;
+    }
+    if before_event.location.file != after_event.location.file {
+        return None;
+    }
+
+    // Detail must contain "(TCWI)"
+    if !before_event.detail.contains("(TCWI)") && !after_event.detail.contains("(TCWI)") {
+        return None;
+    }
+
+    // Extract related events
+    let mut related_events = vec![];
+
+    // TODO: Keep events from each side separate...?
+    related_events.push(before_events.pop_front().unwrap());
+    related_events.push(after_events.pop_front().unwrap());
+
+    Some(Divergence::new(
+        DivergenceType::TailCallWithoutInfo,
+        related_events,
+    ))
 }
 
 // Example diff:
@@ -405,6 +460,10 @@ fn check_for_known_divergences(
     let mut continue_checking = true;
     while continue_checking {
         continue_checking = false;
+        if let Some(divergence) = check_for_tail_call_without_info(op, change_tuples_events) {
+            divergences.push(divergence);
+            continue_checking = true;
+        }
         if let Some(divergence) = check_for_coordinates_removed(op, change_tuples_events) {
             divergences.push(divergence);
             continue_checking = true;
