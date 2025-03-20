@@ -126,7 +126,7 @@ enum DivergenceType {
     LibraryCallRemoved,
     // TODO: Refine this by pass, similar to the paper
     ProgramCallRemoved,
-    Unknown,
+    Uncategorised,
 }
 
 impl DivergenceType {
@@ -136,7 +136,7 @@ impl DivergenceType {
             DivergenceType::CoordinatesChanged => "coordinates-changed",
             DivergenceType::LibraryCallRemoved => "library-call-removed",
             DivergenceType::ProgramCallRemoved => "program-call-removed",
-            DivergenceType::Unknown => "unknown",
+            DivergenceType::Uncategorised => "uncategorised",
         }
     }
 }
@@ -422,7 +422,10 @@ fn check_for_known_divergences(
         for (_tag, events) in change_tuples_events {
             merged_events.append(&mut events.drain(..).collect::<Vec<_>>());
         }
-        divergences.push(Divergence::new(DivergenceType::Unknown, merged_events));
+        divergences.push(Divergence::new(
+            DivergenceType::Uncategorised,
+            merged_events,
+        ));
     }
 
     divergences
