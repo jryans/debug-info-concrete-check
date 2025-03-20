@@ -621,6 +621,25 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
   if (currInstIsBranch && !nextInstInCurrentModule)
     currInstIsTailCall = true;
 
+  // Get the inlined chain for the next instruction.
+  // Note that is currently also (somewhat awkwardly) saved to shared state as
+  // well because the internal function filter depends on it.
+  // TODO: Remove this dependency
+  if (currInstIsCall || currInstIsBranch) {
+    inlinedChain.clear();
+    getInlinedChain(nextAddress, inlinedChain);
+  }
+
+  // If the currently analysed instruction is a branch and moved to
+  // different function, treat this as a tail call.
+  // TODO: Consider how to safely detect this with inlining enabled
+  if (currInstIsBranch && !currInstIsTailCall && prevInlinedChain.size() == 1 &&
+      inlinedChain.size() == 1 && prevInlinedChain != inlinedChain) {
+    if (verbose)
+      *trace << "Branch changed functions, assuming tail call without info\n";
+    currInstIsTailCall = true;
+  }
+
   // If we detected a tail call via any means, log and mark the stack
   if (currInstIsTailCall) {
     if (verbose)
@@ -637,13 +656,6 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
   // If the currently analysed instruction is call-like (call or tail call),
   // push a new stack frame using the debug entry inside the callee
   if (currInstIsCall || currInstIsTailCall) {
-    // Get the inlined chain for the next instruction.
-    // Note that is currently also (somewhat awkwardly) saved to shared state as
-    // well because the internal function filter depends on it.
-    // TODO: Remove this dependency
-    inlinedChain.clear();
-    getInlinedChain(nextAddress, inlinedChain);
-
     // If the inlined chain is empty (implying no debug info for this address),
     // we still push an (empty) entry to record the stack depth change.
     if (!inlinedChain.empty())
