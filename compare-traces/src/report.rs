@@ -21,6 +21,7 @@ enum EventType {
     CallFrom,
     CallTo,
     ReturnFrom,
+    Warning,
     // Verbose,
 }
 
@@ -30,6 +31,7 @@ impl Display for EventType {
             EventType::CallFrom => "CF",
             EventType::CallTo => "CT",
             EventType::ReturnFrom => "RF",
+            EventType::Warning => "🔔",
         };
         write!(f, "{}", abbreviation)
     }
@@ -64,16 +66,22 @@ impl Event {
             rest = &rest[1..];
         }
 
-        // Parse event type
-        let event_type_str = &rest[0..2];
+        // Parse event type after advancing 2 Unicode characters
+        let (event_type_end, _) = rest.char_indices().nth(2).unwrap();
+        let event_type_str = &rest[..event_type_end];
         let event_type = match event_type_str {
             "CF" => EventType::CallFrom,
             "CT" => EventType::CallTo,
             "RF" => EventType::ReturnFrom,
+            "🔔 " => EventType::Warning,
             _ => return Err(anyhow!("Unexpected event type: `{}`", event_type_str)),
         };
-        // Advance past event type and ": " separator
-        rest = &rest[4..];
+        // Advance past event type
+        rest = &rest[event_type_end..];
+        // Advance past ": " separator if used
+        if event_type != EventType::Warning {
+            rest = &rest[2..];
+        }
 
         // Check for corrupt lines containing multiple events
         static EVENT_TYPES_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(CF|CT|RF):").unwrap());
@@ -115,6 +123,9 @@ impl Event {
 
 impl Display for Event {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.event_type == EventType::Warning {
+            return write!(f, "{} {}", self.event_type, self.detail);
+        }
         write!(f, "{}: {}", self.event_type, self.detail)
     }
 }
