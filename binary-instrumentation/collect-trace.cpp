@@ -236,13 +236,15 @@ void printEventFromLineInfo(
     const EventSource &source,
     const std::optional<QBDI::rword> &address = std::nullopt,
     const std::optional<QBDI::VMInstanceRef> &vm = std::nullopt,
-    const std::optional<size_t> &depth = std::nullopt);
+    const std::optional<size_t> &depth = std::nullopt,
+    const std::optional<bool> &tailCallWithoutInfo = std::nullopt);
 
 void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
                             const EventSource &source,
                             const std::optional<QBDI::rword> &address,
                             const std::optional<QBDI::VMInstanceRef> &vm,
-                            const std::optional<size_t> &depth) {
+                            const std::optional<size_t> &depth,
+                            const std::optional<bool> &tailCallWithoutInfo) {
   if (!isFunctionPrintable())
     return;
   printStackDepth(depth);
@@ -269,6 +271,8 @@ void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
     else
       *trace << "🔔 No info for this address";
   }
+  if (tailCallWithoutInfo && *tailCallWithoutInfo)
+    *trace << " (TCWI)";
   *trace << "\n";
   // Flush after each event to avoid trace corruption due to context switching
   // caused by threads, signals, etc.
@@ -685,12 +689,9 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
     const size_t depth = stack.size();
     // Queue for (potential) future printing based on next instruction
     queuedCallToEvent = [=]() {
-      if (tailCallWithoutInfo) {
-        printStackDepth(depth);
-        *trace << "🔔 Tail call without info\n";
-      }
       printEventFromLineInfo(nextLineInfo, EventType::CallTo,
-                             EventSource::Stack, nextAddress, vm, depth);
+                             EventSource::Stack, nextAddress, vm, depth,
+                             tailCallWithoutInfo);
     };
   }
 
