@@ -630,6 +630,7 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
     getInlinedChain(nextAddress, inlinedChain);
   }
 
+  bool tailCallWithoutInfo = false;
   // If the currently analysed instruction is a branch and moved to
   // different function, treat this as a tail call.
   // TODO: Consider how to safely detect this with inlining enabled
@@ -637,6 +638,7 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
       inlinedChain.size() == 1 && prevInlinedChain != inlinedChain) {
     if (verbose)
       *trace << "Branch changed functions, assuming tail call without info\n";
+    tailCallWithoutInfo = true;
     currInstIsTailCall = true;
   }
 
@@ -683,6 +685,10 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
     const size_t depth = stack.size();
     // Queue for (potential) future printing based on next instruction
     queuedCallToEvent = [=]() {
+      if (tailCallWithoutInfo) {
+        printStackDepth(depth);
+        *trace << "🔔 Tail call without info\n";
+      }
       printEventFromLineInfo(nextLineInfo, EventType::CallTo,
                              EventSource::Stack, nextAddress, vm, depth);
     };
