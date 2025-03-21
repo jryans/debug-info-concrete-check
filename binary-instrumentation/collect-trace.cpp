@@ -138,14 +138,16 @@ void getInlinedChain(const QBDI::rword &address,
   std::reverse(inlinedChain.begin(), inlinedChain.end());
 }
 
-DWARFDie getCallSiteEntry(const DWARFDie &entry, const QBDI::rword &address) {
+DWARFDie getCallSiteEntry(const DWARFDie &entry, const QBDI::rword &address,
+                          const uint32_t &instSize) {
   if (!entry.hasChildren())
     return DWARFDie();
   for (const auto &callSite : entry.children()) {
     const auto tag = callSite.getTag();
     // Clang uses `DW_TAG_call_site` (DWARF 5) even when emitting DWARF 4
     // GCC uses `DW_TAG_GNU_call_site` with DWARF 4 in non-strict mode
-    if (tag != dwarf::Tag::DW_TAG_call_site)
+    if (tag != dwarf::Tag::DW_TAG_call_site &&
+        tag != dwarf::Tag::DW_TAG_GNU_call_site)
       continue;
     // Clang
     if (const auto attrValue = callSite.find(dwarf::DW_AT_call_pc)) {
@@ -153,10 +155,10 @@ DWARFDie getCallSiteEntry(const DWARFDie &entry, const QBDI::rword &address) {
         return callSite;
     }
     // GCC includes `DW_AT_low_pc`, but it points at the instruction _after_
-    // if (const auto attrValue = callSite.find(dwarf::DW_AT_low_pc)) {
-    //   if (attrValue->getAsAddress() == address)
-    //     return callSite;
-    // }
+    if (const auto attrValue = callSite.find(dwarf::DW_AT_low_pc)) {
+      if (attrValue->getAsAddress() == (address + instSize))
+        return callSite;
+    }
   }
   return DWARFDie();
 }
@@ -405,6 +407,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     analysisType |= QBDI::ANALYSIS_DISASSEMBLY;
   const QBDI::InstAnalysis *instAnalysis = vm->getInstAnalysis(analysisType);
   const auto &address = instAnalysis->address;
+  const auto &instSize = instAnalysis->instSize;
 
   // Save bits of current instruction analysis that may be of use
   // in the post-instruction hook as well
@@ -558,9 +561,10 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
 
   // Examine branches in case they are actually tail calls
   if (currInstIsBranch && !inlinedChain.empty()) {
-    const auto callSite = getCallSiteEntry(inlinedChain.back(), address);
-    const bool attrFound = !!callSite.find(dwarf::DW_AT_call_tail_call);
-    // TODO: Work out GCC equivalent: callSite.find(dwarf::DW_AT_GNU_tail_call);
+    const auto callSite =
+        getCallSiteEntry(inlinedChain.back(), address, instSize);
+    const bool attrFound = callSite.find(dwarf::DW_AT_call_tail_call) ||
+                           callSite.find(dwarf::DW_AT_GNU_tail_call);
     if (attrFound) {
       // Stack marked as artificial in post-instruction hook
       currInstIsTailCall = true;
