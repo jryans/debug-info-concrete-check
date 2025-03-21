@@ -504,7 +504,11 @@ fn check_for_known_divergences(
 fn tweak_alignment(op: &DiffOp, change_tuples_strings: &mut [(ChangeTag, Vec<&str>)]) {
     if op.tag() == DiffTag::Delete && change_tuples_strings.len() == 1 {
         let change_strings = &change_tuples_strings[0].1;
-        if change_strings.len() > 1 {
+        let string_count = change_strings.len();
+        // Limit to regions of at most 5 lines to accommodate both:
+        // - Internal call (3 lines)
+        // - External call (5 lines)
+        if string_count > 1 && string_count <= 5 {
             let last_string = *change_strings.last().unwrap();
             // Repeated sequences where one part is deleted sometimes appear as
             // 2-N lines of one part, 1 line of next part
