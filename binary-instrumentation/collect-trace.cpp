@@ -269,7 +269,7 @@ void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
     else if (address && !isAddressInCurrentModule(*address))
       *trace << "External code";
     else
-      *trace << "🔔 No info for this address";
+      *trace << "No info for this address";
   }
   if (tailCallWithoutInfo && *tailCallWithoutInfo)
     *trace << " (TCWI)";
@@ -362,7 +362,7 @@ void popStackFrame(const QBDI::VMInstanceRef &vm) {
     // to the same source location across versions.
     // stackDepthChanged = true;
   } else {
-    *trace << "🔔 Ignoring return, stack depth would have wrapped around\n";
+    *trace << "Ignoring return, stack depth would have wrapped around\n";
   }
 
   // Also return from any artificial frames from past tail calls
