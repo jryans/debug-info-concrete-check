@@ -132,9 +132,9 @@ impl Display for Event {
 
 #[derive(Sequence, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 enum DivergenceType {
+    TailCallWithoutInfo,
     CoordinatesRemoved,
     CoordinatesChanged,
-    TailCallWithoutInfo,
     LibraryCallRemoved,
     // TODO: Refine this by pass, similar to the paper
     ProgramCallRemoved,
@@ -144,9 +144,9 @@ enum DivergenceType {
 impl DivergenceType {
     fn to_file_name(&self) -> &str {
         match self {
+            DivergenceType::TailCallWithoutInfo => "tail-call-without-info",
             DivergenceType::CoordinatesRemoved => "coordinates-removed",
             DivergenceType::CoordinatesChanged => "coordinates-changed",
-            DivergenceType::TailCallWithoutInfo => "tail-call-without-info",
             DivergenceType::LibraryCallRemoved => "library-call-removed",
             DivergenceType::ProgramCallRemoved => "program-call-removed",
             DivergenceType::Uncategorised => "uncategorised",
