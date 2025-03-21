@@ -612,8 +612,17 @@ pub fn analyse_and_print_report(
     for (divergence, occurrences) in &divergence_stats_by_coordinates {
         println!("{:?}", divergence.divergence_type);
         println!("  Events:");
-        for event in &divergence.events {
-            println!("    {}", event);
+        let event_count = divergence.events.len();
+        if event_count <= 30 {
+            for event in &divergence.events {
+                println!("    {}", event);
+            }
+        } else {
+            let first_events = &divergence.events[..30];
+            for event in first_events {
+                println!("    {}", event);
+            }
+            println!("    [...{} more events...]", event_count - 30);
         }
         println!("  Occurrences: {}", occurrences);
         if let Some(pass) = &divergence.pass_responsible {
