@@ -505,12 +505,10 @@ fn tweak_alignment(op: &DiffOp, change_tuples_strings: &mut [(ChangeTag, Vec<&st
     if op.tag() == DiffTag::Delete && change_tuples_strings.len() == 1 {
         let change_strings = &change_tuples_strings[0].1;
         if change_strings.len() > 1 {
-            let first_string = *change_strings.first().unwrap();
             let last_string = *change_strings.last().unwrap();
-
-            // Highly likely that the external code lines also appear after the call from event
-            if first_string.to_lowercase().contains("external code") && last_string.contains("CF:")
-            {
+            // Repeated sequences where one part is deleted sometimes appear as
+            // 2-N lines of one part, 1 line of next part
+            if last_string.contains("CF:") {
                 let mut change_strings_reordered = vec![last_string];
                 let last_string_index = change_strings.len() - 1;
                 change_strings_reordered
