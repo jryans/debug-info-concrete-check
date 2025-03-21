@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 use std::{fs, path::PathBuf};
 
 use anyhow::{anyhow, Context, Ok, Result};
@@ -72,6 +73,7 @@ fn main() -> Result<()> {
 
     let diff = TextDiff::configure()
         .algorithm(similar::Algorithm::Patience)
+        .timeout(Duration::from_secs(5 * 60))
         .diff_lines(&before_content, &after_content);
 
     if cli.diff {
