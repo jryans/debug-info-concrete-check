@@ -73,7 +73,7 @@ fn main() -> Result<()> {
 
     let diff = TextDiff::configure()
         .algorithm(similar::Algorithm::Patience)
-        .timeout(Duration::from_secs(5 * 60))
+        .timeout(Duration::from_secs(10 * 60))
         .diff_lines(&before_content, &after_content);
 
     if cli.diff {
