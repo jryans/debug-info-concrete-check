@@ -423,17 +423,25 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     *trace << instAnalysis->disassembly << "\n";
   }
 
+  // Our view of stack depth changes even for tail calls.
+  // We preserve tail caller frames as artificial and
+  // push additional frames for the tail callee.
+  const bool stackDepthMayChange = instAnalysis->affectControlFlow;
+
   // Look for function name and line info related to this address
   // JRS: Remove this and use only the inlined chain...?
-  const auto lineInfo = dwarfCtx->getLineInfoForAddress(
-      {address}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
-                  DILineInfoSpecifier::FunctionNameKind::ShortName});
+  DILineInfo lineInfo;
+  if (verbose || stackDepthMayChange) {
+    lineInfo = dwarfCtx->getLineInfoForAddress(
+        {address}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
+                    DILineInfoSpecifier::FunctionNameKind::ShortName});
+  }
 
   // If we're jumping to external code, we may have queued events
   // that need to be checked against our filters before printing
   // TODO: Check that we're actually in the jump table rather than assuming
   // that's what happens for all branches without line info.
-  const bool isBranchToExternal = !lineInfo && currInstIsBranch;
+  const bool isBranchToExternal = currInstIsBranch && !lineInfo;
   if (isBranchToExternal && !includeExternalLibrary) {
     dropQueue();
   }
@@ -559,11 +567,6 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     }
   }
 
-  // Our view of stack depth changes even for tail calls.
-  // We preserve tail caller frames as artificial and
-  // push additional frames for the tail callee.
-  const bool stackDepthMayChange = instAnalysis->affectControlFlow;
-
   // Log to trace before stack depth changes (by this instruction)
   if (stackDepthMayChange) {
     const size_t depth = stack.size();
@@ -599,12 +602,6 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
                                 QBDI::GPRState *gprState,
                                 QBDI::FPRState *fprState, void *data) {
   const auto &nextAddress = gprState->rip;
-
-  // Look for function name and line info related to this address
-  // JRS: Remove this and use only the inlined chain...?
-  const auto nextLineInfo = dwarfCtx->getLineInfoForAddress(
-      {nextAddress}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
-                      DILineInfoSpecifier::FunctionNameKind::ShortName});
 
   // If the currently analysed instruction is a call or branch,
   // use the next instruction's address to check if we moved to external code
@@ -686,6 +683,11 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
 
   // Log next instruction after stack depth changed
   if (stackDepthChanged) {
+    // Look for function name and line info related to this address
+    // JRS: Remove this and use only the inlined chain...?
+    const auto nextLineInfo = dwarfCtx->getLineInfoForAddress(
+        {nextAddress}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
+                        DILineInfoSpecifier::FunctionNameKind::ShortName});
     const size_t depth = stack.size();
     // Queue for (potential) future printing based on next instruction
     queuedCallToEvent = [=]() {
