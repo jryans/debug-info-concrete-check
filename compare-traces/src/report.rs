@@ -268,8 +268,10 @@ fn check_for_coordinates_removed(
         return None;
     }
 
-    // After event must have missing line and column coordinates
-    if after_event.location.line != Some(0) || after_event.location.column != Some(0) {
+    // After event must have at least missing line coordinate
+    // Some transformations seem to set line 0 but non-0 column,
+    // which is effectively still removal, so we now only examine line here.
+    if after_event.location.line != Some(0) {
         return None;
     }
 
