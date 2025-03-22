@@ -1,3 +1,6 @@
+#ifndef TRACE_DEBUG_H
+#define TRACE_DEBUG_H
+
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -25,3 +28,5 @@ void traceMemoryMaps(llvm::raw_fd_ostream &trace,
           << llvm::format_hex(mm.range.end(), 18) << ")\n";
   }
 }
+
+#endif // TRACE_DEBUG_H

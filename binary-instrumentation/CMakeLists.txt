@@ -19,6 +19,7 @@ find_package(QBDIPreload REQUIRED)
 
 add_library(collect-trace-preload SHARED
   collect-trace.cpp
+  macho.cpp
 )
 
 target_link_libraries(collect-trace-preload PRIVATE

@@ -32,6 +32,7 @@
 
 #include "QBDIPreload.h"
 
+#include "macho.h"
 #include "trace-debug.h"
 
 using namespace llvm;
@@ -49,6 +50,9 @@ bool includeExternalLibrary = true;
 bool includeInternalFunction = true;
 
 std::unique_ptr<raw_fd_ostream> trace;
+
+std::unique_ptr<MemoryBuffer> execBuffer;
+std::unique_ptr<object::Binary> execBinary;
 
 std::unique_ptr<MemoryBuffer> dwarfBuffer;
 std::unique_ptr<object::Binary> dwarfBinary;
@@ -233,6 +237,16 @@ bool isLocationPrintable(const EventType &type) {
   return true;
 }
 
+std::optional<StringRef> findIndirectSymbolName(QBDI::rword address) {
+  const auto &execObjectFile = cast<object::ObjectFile>(*execBinary);
+  // Cached here via `static`
+  static const bool isMacho = execObjectFile.isMachO();
+  if (!isMacho)
+    return std::nullopt;
+  return findIndirectSymbolNameMacho(
+      address, cast<object::MachOObjectFile>(execObjectFile));
+}
+
 void printEventFromLineInfo(
     const DILineInfo &lineInfo, const EventType &type,
     const EventSource &source,
@@ -266,12 +280,17 @@ void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
       *trace << ":" << lineInfo.Line << ":" << lineInfo.Column;
   } else {
     if (address && vm && (*vm)->getCachedInstAnalysis(*address) &&
-        (*vm)->getCachedInstAnalysis(*address)->isBranch)
+        (*vm)->getCachedInstAnalysis(*address)->isBranch) {
       *trace << "Jump to external code";
-    else if (address && !isAddressInCurrentModule(*address))
+      const std::optional<StringRef> symbolName =
+          findIndirectSymbolName(*address);
+      if (symbolName)
+        *trace << " for " << symbolName;
+    } else if (address && !isAddressInCurrentModule(*address)) {
       *trace << "External code";
-    else
+    } else {
       *trace << "No info for this address";
+    }
   }
   if (tailCallWithoutInfo && *tailCallWithoutInfo)
     *trace << " (TCWI)";
@@ -766,6 +785,34 @@ bool loadDWARFDebugInfo(const Twine &dwarfPath) {
   return result;
 }
 
+bool loadExecutable(const Twine &execPath) {
+  // Create memory buffer for executable file
+  ErrorOr<std::unique_ptr<MemoryBuffer>> execBufferMaybe =
+      MemoryBuffer::getFileOrSTDIN(execPath);
+  if (execBufferMaybe.getError()) {
+    errs() << "Error: Unable to open executable file\n";
+    return false;
+  }
+  execBuffer = std::move(execBufferMaybe.get());
+
+  // Parse object file containing executable
+  Expected<std::unique_ptr<object::Binary>> execBinaryMaybe =
+      object::createBinary(*execBuffer);
+  if (execBinaryMaybe.takeError()) {
+    errs() << "Error: Unable to parse object file "
+              "containing executable\n";
+    return false;
+  }
+  execBinary = std::move(execBinaryMaybe.get());
+  if (!isa<object::ObjectFile>(execBinary)) {
+    errs() << "Error: Unexpected object file type "
+              "containing executable\n";
+    return false;
+  }
+
+  return true;
+}
+
 } // namespace
 
 extern "C" {
@@ -804,6 +851,8 @@ int qbdipreload_on_main(int argc, char **argv) {
     includeInternalFunction = false;
 
   StringRef execPath(argv[0]);
+  if (!loadExecutable(execPath))
+    return QBDIPRELOAD_ERR_STARTUP_FAILED;
   if (!loadDWARFDebugInfo(execPath + ".dwarf"))
     return QBDIPRELOAD_ERR_STARTUP_FAILED;
 
