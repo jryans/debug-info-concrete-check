@@ -134,7 +134,8 @@ impl Display for Event {
 enum DivergenceType {
     TailCallWithoutInfo,
     CoordinatesRemoved,
-    CoordinatesChanged,
+    CoordinatesChangedSmall,
+    CoordinatesChangedLarge,
     LibraryCallRemoved,
     // TODO: Refine this by pass, similar to the paper
     ProgramCallRemoved,
@@ -146,7 +147,8 @@ impl DivergenceType {
         match self {
             DivergenceType::TailCallWithoutInfo => "tail-call-without-info",
             DivergenceType::CoordinatesRemoved => "coordinates-removed",
-            DivergenceType::CoordinatesChanged => "coordinates-changed",
+            DivergenceType::CoordinatesChangedSmall => "coordinates-changed-small",
+            DivergenceType::CoordinatesChangedLarge => "coordinates-changed-large",
             DivergenceType::LibraryCallRemoved => "library-call-removed",
             DivergenceType::ProgramCallRemoved => "program-call-removed",
             DivergenceType::Uncategorised => "uncategorised",
@@ -318,12 +320,35 @@ fn check_for_coordinates_changed(
         return None;
     }
 
+    // Line and column coordinates must be present
+    if before_event.location.line.is_none()
+        || before_event.location.column.is_none()
+        || after_event.location.line.is_none()
+        || after_event.location.column.is_none()
+    {
+        return None;
+    }
+
     // Line or column coordinates must differ
     if before_event.location.line == after_event.location.line
         && before_event.location.column == after_event.location.column
     {
         return None;
     }
+
+    // Determine divergence type using line delta
+    let before_line = before_event.location.line.unwrap();
+    let after_line = after_event.location.line.unwrap();
+    let line_delta = if before_line < after_line {
+        after_line - before_line
+    } else {
+        before_line - after_line
+    };
+    let divergence_type = if line_delta <= 3 {
+        DivergenceType::CoordinatesChangedSmall
+    } else {
+        DivergenceType::CoordinatesChangedLarge
+    };
 
     // Extract related events
     let mut related_events = vec![];
@@ -333,7 +358,7 @@ fn check_for_coordinates_changed(
     related_events.push(after_events.pop_front().unwrap());
 
     Some(Divergence::new(
-        DivergenceType::CoordinatesChanged,
+        divergence_type,
         related_events,
     ))
 }
@@ -763,7 +788,7 @@ mod tests {
         let divergence = &divergences[0];
         assert_eq!(
             divergence.divergence_type,
-            DivergenceType::CoordinatesChanged
+            DivergenceType::CoordinatesChangedSmall
         );
         assert_eq!(divergence.events.len(), 2);
         assert_eq!(
