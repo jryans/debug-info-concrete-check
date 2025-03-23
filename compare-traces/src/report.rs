@@ -160,23 +160,33 @@ impl DivergenceType {
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
 pub struct Divergence {
     divergence_type: DivergenceType,
-    events: Vec<Event>,
+    before_events: Vec<Event>,
+    after_events: Vec<Event>,
     pass_responsible: Option<String>,
 }
 
 impl Divergence {
-    fn new(divergence_type: DivergenceType, events: Vec<Event>) -> Divergence {
+    fn new(
+        divergence_type: DivergenceType,
+        before_events: Vec<Event>,
+        after_events: Vec<Event>,
+    ) -> Divergence {
         Divergence {
             divergence_type,
-            events,
+            before_events,
+            after_events,
             pass_responsible: None,
         }
     }
 
     fn location(&self) -> &Location {
-        assert!(!self.events.is_empty());
+        assert!(!self.before_events.is_empty() || !self.after_events.is_empty());
         // Use first event to provide approximate coordinates for divergence
-        &self.events[0].location
+        if !self.before_events.is_empty() {
+            &self.before_events[0].location
+        } else {
+            &self.after_events[0].location
+        }
     }
 }
 
@@ -276,15 +286,16 @@ fn check_for_coordinates_removed(
     }
 
     // Extract related events
-    let mut related_events = vec![];
+    let mut related_before_events = vec![];
+    let mut related_after_events = vec![];
 
-    // TODO: Keep events from each side separate...?
-    related_events.push(before_events.pop_front().unwrap());
-    related_events.push(after_events.pop_front().unwrap());
+    related_before_events.push(before_events.pop_front().unwrap());
+    related_after_events.push(after_events.pop_front().unwrap());
 
     Some(Divergence::new(
         DivergenceType::CoordinatesRemoved,
-        related_events,
+        related_before_events,
+        related_after_events,
     ))
 }
 
@@ -354,15 +365,16 @@ fn check_for_coordinates_changed(
     };
 
     // Extract related events
-    let mut related_events = vec![];
+    let mut related_before_events = vec![];
+    let mut related_after_events = vec![];
 
-    // TODO: Keep events from each side separate...?
-    related_events.push(before_events.pop_front().unwrap());
-    related_events.push(after_events.pop_front().unwrap());
+    related_before_events.push(before_events.pop_front().unwrap());
+    related_after_events.push(after_events.pop_front().unwrap());
 
     Some(Divergence::new(
         divergence_type,
-        related_events,
+        related_before_events,
+        related_after_events,
     ))
 }
 
@@ -405,23 +417,25 @@ fn check_for_library_call_removed(
     }
 
     // Extract related events
-    let mut related_events = vec![];
+    let mut related_before_events = vec![];
+    let related_after_events = vec![];
 
     // First two are known to match
-    related_events.push(events.pop_front().unwrap());
-    related_events.push(events.pop_front().unwrap());
+    related_before_events.push(events.pop_front().unwrap());
+    related_before_events.push(events.pop_front().unwrap());
 
     // Also take any more contiguous events about external code
     while !events.is_empty() {
         if !events[0].detail.to_lowercase().contains("external code") {
             break;
         }
-        related_events.push(events.pop_front().unwrap());
+        related_before_events.push(events.pop_front().unwrap());
     }
 
     Some(Divergence::new(
         DivergenceType::LibraryCallRemoved,
-        related_events,
+        related_before_events,
+        related_after_events,
     ))
 }
 
@@ -461,14 +475,16 @@ fn check_for_program_call_removed(
     }
 
     // Extract related events
-    let mut related_events = vec![];
-    related_events.push(events.pop_front().unwrap());
-    related_events.push(events.pop_front().unwrap());
-    related_events.push(events.pop_front().unwrap());
+    let mut related_before_events = vec![];
+    let related_after_events = vec![];
+    related_before_events.push(events.pop_front().unwrap());
+    related_before_events.push(events.pop_front().unwrap());
+    related_before_events.push(events.pop_front().unwrap());
 
     Some(Divergence::new(
         DivergenceType::ProgramCallRemoved,
-        related_events,
+        related_before_events,
+        related_after_events,
     ))
 }
 
@@ -515,14 +531,23 @@ fn check_for_known_divergences(
         .iter()
         .any(|(_tag, events)| !events.is_empty())
     {
-        // TODO: Keep events separated by tuple...?
-        let mut merged_events = vec![];
-        for (_tag, events) in change_tuples_events {
-            merged_events.append(&mut events.drain(..).collect::<Vec<_>>());
+        let mut remaining_before_events = vec![];
+        let mut remaining_after_events = vec![];
+        for (tag, events) in change_tuples_events {
+            if *tag == ChangeTag::Equal {
+                continue;
+            }
+            let mut collected_events = events.drain(..).collect::<Vec<_>>();
+            if *tag == ChangeTag::Delete {
+                remaining_before_events.append(&mut collected_events);
+            } else {
+                remaining_after_events.append(&mut collected_events);
+            }
         }
         divergences.push(Divergence::new(
             DivergenceType::Uncategorised,
-            merged_events,
+            remaining_before_events,
+            remaining_after_events,
         ));
     }
 
@@ -547,6 +572,21 @@ fn tweak_alignment(op: &DiffOp, change_tuples_strings: &mut [(ChangeTag, Vec<&st
                 change_tuples_strings[0].1 = change_strings_reordered;
             }
         }
+    }
+}
+
+fn print_events(events: &Vec<Event>) {
+    let event_count = events.len();
+    if event_count <= 30 {
+        for event in events {
+            println!("    {}", event);
+        }
+    } else {
+        let first_events = &events[..30];
+        for event in first_events {
+            println!("    {}", event);
+        }
+        println!("    [...{} more events...]", event_count - 30);
     }
 }
 
@@ -643,18 +683,13 @@ pub fn analyse_and_print_report(
     let mut occurrences_total: u64 = 0;
     for (divergence, occurrences) in &divergence_stats_by_coordinates {
         println!("{:?}", divergence.divergence_type);
-        println!("  Events:");
-        let event_count = divergence.events.len();
-        if event_count <= 30 {
-            for event in &divergence.events {
-                println!("    {}", event);
-            }
-        } else {
-            let first_events = &divergence.events[..30];
-            for event in first_events {
-                println!("    {}", event);
-            }
-            println!("    [...{} more events...]", event_count - 30);
+        if !divergence.before_events.is_empty() {
+            println!("  Before events:");
+            print_events(&divergence.before_events);
+        }
+        if !divergence.after_events.is_empty() {
+            println!("  After events:");
+            print_events(&divergence.after_events);
         }
         println!("  Occurrences: {}", occurrences);
         if let Some(pass) = &divergence.pass_responsible {
@@ -692,7 +727,7 @@ pub fn analyse_and_print_report(
     divergence_stats_by_coordinates
 }
 
-pub fn print_events_by_type(
+pub fn print_before_events_by_type(
     divergence_stats_by_coordinates: &BTreeMap<Divergence, u64>,
     events_by_type_dir: &PathBuf,
 ) -> Result<()> {
@@ -710,7 +745,7 @@ pub fn print_events_by_type(
 
     for divergence in divergence_stats_by_coordinates.keys() {
         let mut file = &files_by_type[&divergence.divergence_type];
-        for event in &divergence.events {
+        for event in &divergence.before_events {
             writeln!(file, "{}", event)?;
         }
     }
@@ -757,8 +792,12 @@ mod tests {
             divergence.divergence_type,
             DivergenceType::CoordinatesRemoved
         );
-        assert_eq!(divergence.events.len(), 2);
-        assert_eq!(divergence.events[0].detail, "getnanotime at trace.c:397:18");
+        assert_eq!(divergence.before_events.len(), 1);
+        assert_eq!(divergence.after_events.len(), 1);
+        assert_eq!(
+            divergence.before_events[0].detail,
+            "getnanotime at trace.c:397:18"
+        );
     }
 
     #[test]
@@ -793,9 +832,10 @@ mod tests {
             divergence.divergence_type,
             DivergenceType::CoordinatesChangedSmall
         );
-        assert_eq!(divergence.events.len(), 2);
+        assert_eq!(divergence.before_events.len(), 1);
+        assert_eq!(divergence.after_events.len(), 1);
         assert_eq!(
-            divergence.events[0].detail,
+            divergence.before_events[0].detail,
             "xstrdup_or_null at git-compat-util.h:1168:0"
         );
     }
@@ -830,7 +870,7 @@ mod tests {
             divergence.divergence_type,
             DivergenceType::LibraryCallRemoved
         );
-        assert_eq!(divergence.events.len(), 5);
+        assert_eq!(divergence.before_events.len(), 5);
     }
 
     #[test]
@@ -873,7 +913,7 @@ mod tests {
                 divergence.divergence_type,
                 DivergenceType::LibraryCallRemoved
             );
-            assert_eq!(divergence.events.len(), 5);
+            assert_eq!(divergence.before_events.len(), 5);
         }
     }
 
@@ -903,6 +943,6 @@ mod tests {
             divergence.divergence_type,
             DivergenceType::ProgramCallRemoved
         );
-        assert_eq!(divergence.events.len(), 3);
+        assert_eq!(divergence.before_events.len(), 3);
     }
 }

@@ -8,7 +8,7 @@ use similar::TextDiff;
 
 use crate::diff::print_diff;
 use crate::remarks::{load_remarks, Remark};
-use crate::report::{analyse_and_print_report, print_events_by_type, Location};
+use crate::report::{analyse_and_print_report, print_before_events_by_type, Location};
 
 mod diff;
 mod remarks;
@@ -89,7 +89,7 @@ fn main() -> Result<()> {
                     events_by_type_dir.display(),
                 ));
             }
-            print_events_by_type(&divergence_stats_by_coordinates, &events_by_type_dir)?;
+            print_before_events_by_type(&divergence_stats_by_coordinates, &events_by_type_dir)?;
         }
     }
 
