@@ -38,15 +38,19 @@ pub fn print_change_vec(op: &DiffOp, change_tuples: &[(ChangeTag, Vec<&str>)]) {
     print_change(op, change_tuples_slices.as_slice());
 }
 
+pub fn print_change_group(diff: &TextDiff<'_, '_, '_, str>, op_group: &Vec<DiffOp>) {
+    for op in op_group {
+        let change_tuples: Vec<_> = op
+            .iter_slices(diff.old_slices(), diff.new_slices())
+            .collect();
+        print_change(&op, &change_tuples);
+    }
+}
+
 pub fn print_diff(diff: &TextDiff<'_, '_, '_, str>) {
     // TODO: Add `context` option to reveal surrounding lines when desired
     for op_group in diff.grouped_ops(0) {
-        for op in op_group {
-            let change_tuples: Vec<_> = op
-                .iter_slices(diff.old_slices(), diff.new_slices())
-                .collect();
-            print_change(&op, &change_tuples);
-        }
+        print_change_group(&diff, &op_group);
         println!("---");
     }
 }

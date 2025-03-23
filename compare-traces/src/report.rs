@@ -14,7 +14,10 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use similar::{ChangeTag, DiffOp, DiffTag, TextDiff};
 
-use crate::{diff::print_change_vec, remarks::Remark};
+use crate::{
+    diff::{print_change_group, print_change_vec},
+    remarks::Remark,
+};
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 enum EventType {
@@ -191,135 +194,145 @@ impl Divergence {
 // < CF: getnanotime at trace.c:397:18
 // > CF: getnanotime at trace.c:0:0
 fn check_for_coordinates_removed(
-    op: &DiffOp,
-    change_tuples_events: &mut [(ChangeTag, VecDeque<Event>)],
-) -> Option<Divergence> {
-    // Diff op for this region should be replace
-    if op.tag() != DiffTag::Replace {
-        return None;
+    grouped_events: &mut [(DiffTag, Vec<(ChangeTag, VecDeque<Event>)>)],
+) -> Vec<Divergence> {
+    let mut divergences = vec![];
+
+    for (diff_tag, change_tuples_events) in grouped_events {
+        // Diff op for this region should be replace
+        if *diff_tag != DiffTag::Replace {
+            continue;
+        }
+
+        // Should have two tuples with deleted and inserted lines
+        assert!(change_tuples_events.len() == 2);
+        let (befores, afters) = change_tuples_events.split_at_mut(1);
+        let (before_change_tag, before_events) = &mut befores[0];
+        let (after_change_tag, after_events) = &mut afters[0];
+        assert!(*before_change_tag == ChangeTag::Delete);
+        assert!(*after_change_tag == ChangeTag::Insert);
+
+        // Must have at least one event on both sides
+        if before_events.len() < 1 || after_events.len() < 1 {
+            continue;
+        }
+
+        // Function and file must match
+        let before_event = &before_events[0];
+        let after_event = &after_events[0];
+        if before_event.location.function != after_event.location.function {
+            continue;
+        }
+        if before_event.location.file != after_event.location.file {
+            continue;
+        }
+
+        // After event must have at least missing line coordinate
+        // Some transformations seem to set line 0 but non-0 column,
+        // which is effectively still removal, so we now only examine line here.
+        if after_event.location.line != Some(0) {
+            continue;
+        }
+
+        // Extract related events
+        let mut related_before_events = vec![];
+        let mut related_after_events = vec![];
+
+        related_before_events.push(before_events.pop_front().unwrap());
+        related_after_events.push(after_events.pop_front().unwrap());
+
+        divergences.push(Divergence::new(
+            DivergenceType::CoordinatesRemoved,
+            related_before_events,
+            related_after_events,
+        ));
     }
 
-    // Should have two tuples with deleted and inserted lines
-    assert!(change_tuples_events.len() == 2);
-    let (befores, afters) = change_tuples_events.split_at_mut(1);
-    let (before_change_tag, before_events) = &mut befores[0];
-    let (after_change_tag, after_events) = &mut afters[0];
-    assert!(*before_change_tag == ChangeTag::Delete);
-    assert!(*after_change_tag == ChangeTag::Insert);
-
-    // Must have at least one event on both sides
-    if before_events.len() < 1 || after_events.len() < 1 {
-        return None;
-    }
-
-    // Function and file must match
-    let before_event = &before_events[0];
-    let after_event = &after_events[0];
-    if before_event.location.function != after_event.location.function {
-        return None;
-    }
-    if before_event.location.file != after_event.location.file {
-        return None;
-    }
-
-    // After event must have at least missing line coordinate
-    // Some transformations seem to set line 0 but non-0 column,
-    // which is effectively still removal, so we now only examine line here.
-    if after_event.location.line != Some(0) {
-        return None;
-    }
-
-    // Extract related events
-    let mut related_before_events = vec![];
-    let mut related_after_events = vec![];
-
-    related_before_events.push(before_events.pop_front().unwrap());
-    related_after_events.push(after_events.pop_front().unwrap());
-
-    Some(Divergence::new(
-        DivergenceType::CoordinatesRemoved,
-        related_before_events,
-        related_after_events,
-    ))
+    divergences
 }
 
 // Example diff:
 // < CT: xstrdup_or_null at git-compat-util.h:1168:0
 // > CT: xstrdup_or_null at git-compat-util.h:1169:9
 fn check_for_coordinates_changed(
-    op: &DiffOp,
-    change_tuples_events: &mut [(ChangeTag, VecDeque<Event>)],
-) -> Option<Divergence> {
-    // Diff op for this region should be replace
-    if op.tag() != DiffTag::Replace {
-        return None;
+    grouped_events: &mut [(DiffTag, Vec<(ChangeTag, VecDeque<Event>)>)],
+) -> Vec<Divergence> {
+    let mut divergences = vec![];
+
+    for (diff_tag, change_tuples_events) in grouped_events {
+        // Diff op for this region should be replace
+        if *diff_tag != DiffTag::Replace {
+            continue;
+        }
+
+        // Should have two tuples with deleted and inserted lines
+        assert!(change_tuples_events.len() == 2);
+        let (befores, afters) = change_tuples_events.split_at_mut(1);
+        let (before_change_tag, before_events) = &mut befores[0];
+        let (after_change_tag, after_events) = &mut afters[0];
+        assert!(*before_change_tag == ChangeTag::Delete);
+        assert!(*after_change_tag == ChangeTag::Insert);
+
+        // Must have at least one event on both sides
+        if before_events.len() < 1 || after_events.len() < 1 {
+            continue;
+        }
+
+        // Function and file must match
+        let before_event = &before_events[0];
+        let after_event = &after_events[0];
+        if before_event.location.function != after_event.location.function {
+            continue;
+        }
+        if before_event.location.file != after_event.location.file {
+            continue;
+        }
+
+        // Line and column coordinates must be present
+        if before_event.location.line.is_none()
+            || before_event.location.column.is_none()
+            || after_event.location.line.is_none()
+            || after_event.location.column.is_none()
+        {
+            continue;
+        }
+
+        // Line or column coordinates must differ
+        if before_event.location.line == after_event.location.line
+            && before_event.location.column == after_event.location.column
+        {
+            continue;
+        }
+
+        // Determine divergence type using line delta
+        let before_line = before_event.location.line.unwrap();
+        let after_line = after_event.location.line.unwrap();
+        let line_delta = if before_line < after_line {
+            after_line - before_line
+        } else {
+            before_line - after_line
+        };
+        let divergence_type = if line_delta <= 3 {
+            DivergenceType::CoordinatesChangedSmall
+        } else {
+            DivergenceType::CoordinatesChangedLarge
+        };
+
+        // Extract related events
+        let mut related_before_events = vec![];
+        let mut related_after_events = vec![];
+
+        related_before_events.push(before_events.pop_front().unwrap());
+        related_after_events.push(after_events.pop_front().unwrap());
+
+        divergences.push(Divergence::new(
+            divergence_type,
+            related_before_events,
+            related_after_events,
+        ));
     }
 
-    // Should have two tuples with deleted and inserted lines
-    assert!(change_tuples_events.len() == 2);
-    let (befores, afters) = change_tuples_events.split_at_mut(1);
-    let (before_change_tag, before_events) = &mut befores[0];
-    let (after_change_tag, after_events) = &mut afters[0];
-    assert!(*before_change_tag == ChangeTag::Delete);
-    assert!(*after_change_tag == ChangeTag::Insert);
-
-    // Must have at least one event on both sides
-    if before_events.len() < 1 || after_events.len() < 1 {
-        return None;
-    }
-
-    // Function and file must match
-    let before_event = &before_events[0];
-    let after_event = &after_events[0];
-    if before_event.location.function != after_event.location.function {
-        return None;
-    }
-    if before_event.location.file != after_event.location.file {
-        return None;
-    }
-
-    // Line and column coordinates must be present
-    if before_event.location.line.is_none()
-        || before_event.location.column.is_none()
-        || after_event.location.line.is_none()
-        || after_event.location.column.is_none()
-    {
-        return None;
-    }
-
-    // Line or column coordinates must differ
-    if before_event.location.line == after_event.location.line
-        && before_event.location.column == after_event.location.column
-    {
-        return None;
-    }
-
-    // Determine divergence type using line delta
-    let before_line = before_event.location.line.unwrap();
-    let after_line = after_event.location.line.unwrap();
-    let line_delta = if before_line < after_line {
-        after_line - before_line
-    } else {
-        before_line - after_line
-    };
-    let divergence_type = if line_delta <= 3 {
-        DivergenceType::CoordinatesChangedSmall
-    } else {
-        DivergenceType::CoordinatesChangedLarge
-    };
-
-    // Extract related events
-    let mut related_before_events = vec![];
-    let mut related_after_events = vec![];
-
-    related_before_events.push(before_events.pop_front().unwrap());
-    related_after_events.push(after_events.pop_front().unwrap());
-
-    Some(Divergence::new(
-        divergence_type,
-        related_before_events,
-        related_after_events,
-    ))
+    divergences
 }
 
 // Example diff:
@@ -329,58 +342,63 @@ fn check_for_coordinates_changed(
 // -     CT: External code
 // -   RF: Jump to external code
 fn check_for_library_call_removed(
-    op: &DiffOp,
-    change_tuples_events: &mut [(ChangeTag, VecDeque<Event>)],
-) -> Option<Divergence> {
-    // Diff op for this region should be delete
-    if op.tag() != DiffTag::Delete {
-        return None;
-    }
+    grouped_events: &mut [(DiffTag, Vec<(ChangeTag, VecDeque<Event>)>)],
+) -> Vec<Divergence> {
+    let mut divergences = vec![];
 
-    // Should have a single tuple with deleted lines
-    assert!(change_tuples_events.len() == 1);
-    let (change_tag, events) = &mut change_tuples_events[0];
-    assert!(*change_tag == ChangeTag::Delete);
-
-    // Must have at least 2 events
-    if events.len() < 2 {
-        return None;
-    }
-
-    // First event should be call from traced binary
-    if events[0].event_type != EventType::CallFrom {
-        return None;
-    }
-
-    // Second event should be call to external library
-    if events[1].event_type != EventType::CallTo {
-        return None;
-    }
-    if !events[1].detail.to_lowercase().contains("external code") {
-        return None;
-    }
-
-    // Extract related events
-    let mut related_before_events = vec![];
-    let related_after_events = vec![];
-
-    // First two are known to match
-    related_before_events.push(events.pop_front().unwrap());
-    related_before_events.push(events.pop_front().unwrap());
-
-    // Also take any more contiguous events about external code
-    while !events.is_empty() {
-        if !events[0].detail.to_lowercase().contains("external code") {
-            break;
+    for (diff_tag, change_tuples_events) in grouped_events {
+        // Diff op for this region should be delete
+        if *diff_tag != DiffTag::Delete {
+            continue;
         }
+
+        // Should have a single tuple with deleted lines
+        assert!(change_tuples_events.len() == 1);
+        let (change_tag, events) = &mut change_tuples_events[0];
+        assert!(*change_tag == ChangeTag::Delete);
+
+        // Must have at least 2 events
+        if events.len() < 2 {
+            continue;
+        }
+
+        // First event should be call from traced binary
+        if events[0].event_type != EventType::CallFrom {
+            continue;
+        }
+
+        // Second event should be call to external library
+        if events[1].event_type != EventType::CallTo {
+            continue;
+        }
+        if !events[1].detail.to_lowercase().contains("external code") {
+            continue;
+        }
+
+        // Extract related events
+        let mut related_before_events = vec![];
+        let related_after_events = vec![];
+
+        // First two are known to match
         related_before_events.push(events.pop_front().unwrap());
+        related_before_events.push(events.pop_front().unwrap());
+
+        // Also take any more contiguous events about external code
+        while !events.is_empty() {
+            if !events[0].detail.to_lowercase().contains("external code") {
+                break;
+            }
+            related_before_events.push(events.pop_front().unwrap());
+        }
+
+        divergences.push(Divergence::new(
+            DivergenceType::LibraryCallRemoved,
+            related_before_events,
+            related_after_events,
+        ));
     }
 
-    Some(Divergence::new(
-        DivergenceType::LibraryCallRemoved,
-        related_before_events,
-        related_after_events,
-    ))
+    divergences
 }
 
 // Example diff:
@@ -388,113 +406,131 @@ fn check_for_library_call_removed(
 // -   CT: git_has_dos_drive_prefix at git-compat-util.h:432:0
 // -   RF: git_has_dos_drive_prefix at git-compat-util.h:433:2
 fn check_for_program_call_removed(
-    op: &DiffOp,
-    change_tuples_events: &mut [(ChangeTag, VecDeque<Event>)],
-) -> Option<Divergence> {
-    // Diff op for this region should be delete
-    if op.tag() != DiffTag::Delete {
-        return None;
-    }
-
-    // Should have a single tuple with deleted lines
-    assert!(change_tuples_events.len() == 1);
-    let (change_tag, events) = &mut change_tuples_events[0];
-    assert!(*change_tag == ChangeTag::Delete);
-
-    // Must have at least 3 events
-    if events.len() < 3 {
-        return None;
-    }
-
-    // Event sequence should be call from, call to, return from
-    // TODO: Support more complex trees with nested calls
-    if events[0].event_type != EventType::CallFrom {
-        return None;
-    }
-    if events[1].event_type != EventType::CallTo {
-        return None;
-    }
-    if events[2].event_type != EventType::ReturnFrom {
-        return None;
-    }
-
-    // Extract related events
-    let mut related_before_events = vec![];
-    let related_after_events = vec![];
-    related_before_events.push(events.pop_front().unwrap());
-    related_before_events.push(events.pop_front().unwrap());
-    related_before_events.push(events.pop_front().unwrap());
-
-    Some(Divergence::new(
-        DivergenceType::ProgramCallRemoved,
-        related_before_events,
-        related_after_events,
-    ))
-}
-
-fn check_for_known_divergences(
-    op: &DiffOp,
-    change_tuples_events: &mut [(ChangeTag, VecDeque<Event>)],
+    grouped_events: &mut [(DiffTag, Vec<(ChangeTag, VecDeque<Event>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
-    if log_enabled!(log::Level::Debug) {
-        println!("{:#?}", op);
-        println!("{:#?}", change_tuples_events);
-        println!();
-    }
+    for (diff_tag, change_tuples_events) in grouped_events {
+        // Diff op for this region should be delete
+        if *diff_tag != DiffTag::Delete {
+            continue;
+        }
 
-    // Check for divergences at least once and keep going each time more are found
-    let mut continue_checking = true;
-    while continue_checking {
-        continue_checking = false;
-        if let Some(divergence) = check_for_coordinates_removed(op, change_tuples_events) {
-            divergences.push(divergence);
-            continue_checking = true;
-        }
-        if let Some(divergence) = check_for_coordinates_changed(op, change_tuples_events) {
-            divergences.push(divergence);
-            continue_checking = true;
-        }
-        if let Some(divergence) = check_for_library_call_removed(op, change_tuples_events) {
-            divergences.push(divergence);
-            continue_checking = true;
-        }
-        if let Some(divergence) = check_for_program_call_removed(op, change_tuples_events) {
-            divergences.push(divergence);
-            continue_checking = true;
-        }
-    }
+        // Should have a single tuple with deleted lines
+        assert!(change_tuples_events.len() == 1);
+        let (change_tag, events) = &mut change_tuples_events[0];
+        assert!(*change_tag == ChangeTag::Delete);
 
-    // If any events remain, record an unknown divergence
-    if change_tuples_events
-        .iter()
-        .any(|(_tag, events)| !events.is_empty())
-    {
-        let mut remaining_before_events = vec![];
-        let mut remaining_after_events = vec![];
-        for (tag, events) in change_tuples_events {
-            if *tag == ChangeTag::Equal {
-                continue;
-            }
-            let mut collected_events = events.drain(..).collect::<Vec<_>>();
-            if *tag == ChangeTag::Delete {
-                remaining_before_events.append(&mut collected_events);
-            } else {
-                remaining_after_events.append(&mut collected_events);
-            }
+        // Must have at least 3 events
+        if events.len() < 3 {
+            continue;
         }
+
+        // Event sequence should be call from, call to, return from
+        // TODO: Support more complex trees with nested calls
+        if events[0].event_type != EventType::CallFrom {
+            continue;
+        }
+        if events[1].event_type != EventType::CallTo {
+            continue;
+        }
+        if events[2].event_type != EventType::ReturnFrom {
+            continue;
+        }
+
+        // Extract related events
+        let mut related_before_events = vec![];
+        let related_after_events = vec![];
+        related_before_events.push(events.pop_front().unwrap());
+        related_before_events.push(events.pop_front().unwrap());
+        related_before_events.push(events.pop_front().unwrap());
+
         divergences.push(Divergence::new(
-            DivergenceType::Uncategorised,
-            remaining_before_events,
-            remaining_after_events,
+            DivergenceType::ProgramCallRemoved,
+            related_before_events,
+            related_after_events,
         ));
     }
 
     divergences
 }
 
-fn tweak_alignment(op: &DiffOp, change_tuples_strings: &mut [(ChangeTag, Vec<&str>)]) {
+fn check_for_known_divergences(
+    grouped_events: &mut [(DiffTag, Vec<(ChangeTag, VecDeque<Event>)>)],
+) -> Vec<Divergence> {
+    let mut divergences = vec![];
+
+    // Check for divergences at least once and keep going each time more are found
+    // JRS: Change patterns to produce all matching divergences up front...?
+    let mut continue_checking = true;
+    while continue_checking {
+        continue_checking = false;
+        {
+            let mut divergences_found = check_for_coordinates_removed(grouped_events);
+            if !divergences_found.is_empty() {
+                divergences.append(&mut divergences_found);
+                continue_checking = true;
+            }
+        }
+        {
+            let mut divergences_found = check_for_coordinates_changed(grouped_events);
+            if !divergences_found.is_empty() {
+                divergences.append(&mut divergences_found);
+                continue_checking = true;
+            }
+        }
+        {
+            let mut divergences_found = check_for_library_call_removed(grouped_events);
+            if !divergences_found.is_empty() {
+                divergences.append(&mut divergences_found);
+                continue_checking = true;
+            }
+        }
+        {
+            let mut divergences_found = check_for_program_call_removed(grouped_events);
+            if !divergences_found.is_empty() {
+                divergences.append(&mut divergences_found);
+                continue_checking = true;
+            }
+        }
+    }
+
+    // If any events remain, record an unknown divergence
+    for (diff_tag, change_tuples_events) in grouped_events {
+        if *diff_tag == DiffTag::Equal {
+            continue;
+        }
+        if change_tuples_events
+            .iter()
+            .any(|(_tag, events)| !events.is_empty())
+        {
+            let mut remaining_before_events = vec![];
+            let mut remaining_after_events = vec![];
+            for (change_tag, events) in change_tuples_events {
+                if *change_tag == ChangeTag::Equal {
+                    continue;
+                }
+                let mut collected_events = events.drain(..).collect::<Vec<_>>();
+                if *change_tag == ChangeTag::Delete {
+                    remaining_before_events.append(&mut collected_events);
+                } else {
+                    remaining_after_events.append(&mut collected_events);
+                }
+            }
+            divergences.push(Divergence::new(
+                DivergenceType::Uncategorised,
+                remaining_before_events,
+                remaining_after_events,
+            ));
+        }
+    }
+
+    divergences
+}
+
+fn tweak_alignment(op: &DiffOp, change_tuples_strings: &mut [(ChangeTag, Vec<&str>)]) -> bool {
+    let mut changed: bool = false;
+
     if op.tag() == DiffTag::Delete && change_tuples_strings.len() == 1 {
         let change_strings = &change_tuples_strings[0].1;
         let string_count = change_strings.len();
@@ -510,9 +546,12 @@ fn tweak_alignment(op: &DiffOp, change_tuples_strings: &mut [(ChangeTag, Vec<&st
                 let last_string_index = change_strings.len() - 1;
                 change_strings_reordered.extend_from_slice(&change_strings[..last_string_index]);
                 change_tuples_strings[0].1 = change_strings_reordered;
+                changed = true;
             }
         }
     }
+
+    changed
 }
 
 fn print_events(events: &Vec<Event>) {
@@ -539,13 +578,15 @@ pub fn analyse_and_print_report(
 
     let mut divergence_stats_by_coordinates: BTreeMap<Divergence, u64> = BTreeMap::new();
 
-    for op_group in diff.grouped_ops(0) {
-        for op in op_group {
-            // Skip matching regions
-            if op.tag() == DiffTag::Equal {
-                continue;
-            }
+    for op_group in diff.grouped_ops(1) {
+        if log_enabled!(log::Level::Debug) {
+            print_change_group(diff, &op_group);
+            println!();
+        }
 
+        let mut grouped_events: Vec<(DiffTag, Vec<(ChangeTag, VecDeque<Event>)>)> = vec![];
+
+        for op in op_group {
             // TODO: Skip unnecessary collects / copies
             let mut change_tuples_strings: Vec<_> = op
                 .iter_slices(diff.old_slices(), diff.new_slices())
@@ -553,16 +594,18 @@ pub fn analyse_and_print_report(
                 .collect();
 
             // Fix up alignment where possible
-            tweak_alignment(&op, &mut change_tuples_strings);
-
-            if log_enabled!(log::Level::Debug) {
-                print_change_vec(&op, &change_tuples_strings);
-                println!();
+            // JRS: Maybe remove this by using the previous line from context...?
+            if tweak_alignment(&op, &mut change_tuples_strings) {
+                if log_enabled!(log::Level::Debug) {
+                    println!("Alignment tweaked, new ordering:");
+                    print_change_vec(&op, &change_tuples_strings);
+                    println!();
+                }
             }
 
             // Parse raw text into events
             let mut parse_errors = vec![];
-            let mut change_tuples_events: Vec<_> = change_tuples_strings
+            let change_tuples_events: Vec<_> = change_tuples_strings
                 .iter()
                 .map(|(tag, strings)| {
                     (
@@ -580,35 +623,37 @@ pub fn analyse_and_print_report(
                 println!();
             }
 
-            // Check events against known divergence patterns
-            let mut new_divergences = check_for_known_divergences(&op, &mut change_tuples_events);
-            for divergence in &mut new_divergences {
-                if log_enabled!(log::Level::Debug) {
-                    println!("{:#?}", divergence);
-                    println!();
-                }
+            grouped_events.push((op.tag(), change_tuples_events));
+        }
 
-                // Look for optimisation remarks at divergence coordinates
-                if let Some(remarks) = remarks_by_location {
-                    // TODO: Enable for other types where possible
-                    if divergence.divergence_type == DivergenceType::ProgramCallRemoved {
-                        if let Some(remark) = remarks.get(divergence.location()) {
-                            if log_enabled!(log::Level::Debug) {
-                                println!("Matching remark: {:#?}", remark);
-                                println!();
-                            }
-                            // Record pass responsible in divergence
-                            divergence.pass_responsible = Some(remark.pass.clone());
+        // Check events against known divergence patterns
+        let mut new_divergences = check_for_known_divergences(&mut grouped_events);
+        for divergence in &mut new_divergences {
+            if log_enabled!(log::Level::Debug) {
+                println!("{:#?}", divergence);
+                println!();
+            }
+
+            // Look for optimisation remarks at divergence coordinates
+            if let Some(remarks) = remarks_by_location {
+                // TODO: Enable for other types where possible
+                if divergence.divergence_type == DivergenceType::ProgramCallRemoved {
+                    if let Some(remark) = remarks.get(divergence.location()) {
+                        if log_enabled!(log::Level::Debug) {
+                            println!("Matching remark: {:#?}", remark);
+                            println!();
                         }
+                        // Record pass responsible in divergence
+                        divergence.pass_responsible = Some(remark.pass.clone());
                     }
                 }
+            }
 
-                // Insert or update stats for these source coordinates
-                if let Some(occurrences) = divergence_stats_by_coordinates.get_mut(divergence) {
-                    *occurrences += 1;
-                } else {
-                    divergence_stats_by_coordinates.insert(divergence.clone(), 1);
-                }
+            // Insert or update stats for these source coordinates
+            if let Some(occurrences) = divergence_stats_by_coordinates.get_mut(divergence) {
+                *occurrences += 1;
+            } else {
+                divergence_stats_by_coordinates.insert(divergence.clone(), 1);
             }
         }
     }
@@ -709,13 +754,8 @@ mod tests {
         // Example diff:
         // < CF: getnanotime at trace.c:397:18
         // > CF: getnanotime at trace.c:0:0
-        let op = DiffOp::Replace {
-            old_index: 7,
-            old_len: 1,
-            new_index: 7,
-            new_len: 1,
-        };
-        let mut change_tuples_events = [
+        let op_tag = DiffTag::Replace;
+        let change_tuples_events = Vec::from([
             (
                 ChangeTag::Delete,
                 VecDeque::from([Event::parse("CF: getnanotime at trace.c:397:18").unwrap()]),
@@ -724,8 +764,9 @@ mod tests {
                 ChangeTag::Insert,
                 VecDeque::from([Event::parse("CF: getnanotime at trace.c:0:0").unwrap()]),
             ),
-        ];
-        let divergences = check_for_known_divergences(&op, &mut change_tuples_events);
+        ]);
+        let mut grouped_events = [(op_tag, change_tuples_events)];
+        let divergences = check_for_known_divergences(&mut grouped_events);
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
@@ -745,13 +786,8 @@ mod tests {
         // Example diff:
         // < CT: xstrdup_or_null at git-compat-util.h:1168:0
         // > CT: xstrdup_or_null at git-compat-util.h:1169:9
-        let op = DiffOp::Replace {
-            old_index: 444,
-            old_len: 1,
-            new_index: 390,
-            new_len: 1,
-        };
-        let mut change_tuples_events = [
+        let op_tag = DiffTag::Replace;
+        let change_tuples_events = Vec::from([
             (
                 ChangeTag::Delete,
                 VecDeque::from([
@@ -764,8 +800,9 @@ mod tests {
                     Event::parse("CT: xstrdup_or_null at git-compat-util.h:1169:9").unwrap(),
                 ]),
             ),
-        ];
-        let divergences = check_for_known_divergences(&op, &mut change_tuples_events);
+        ]);
+        let mut grouped_events = [(op_tag, change_tuples_events)];
+        let divergences = check_for_known_divergences(&mut grouped_events);
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
@@ -788,12 +825,8 @@ mod tests {
         // -   CF: Jump to external code
         // -     CT: External code
         // -   RF: Jump to external code
-        let op = DiffOp::Delete {
-            old_index: 134,
-            old_len: 5,
-            new_index: 125,
-        };
-        let mut change_tuples_events = [(
+        let op_tag = DiffTag::Delete;
+        let change_tuples_events = Vec::from([(
             ChangeTag::Delete,
             VecDeque::from([
                 Event::parse("CF: strbuf_init at strbuf.c:57:2").unwrap(),
@@ -802,8 +835,9 @@ mod tests {
                 Event::parse("CT: External code").unwrap(),
                 Event::parse("RF: Jump to external code").unwrap(),
             ]),
-        )];
-        let divergences = check_for_known_divergences(&op, &mut change_tuples_events);
+        )]);
+        let mut grouped_events = [(op_tag, change_tuples_events)];
+        let divergences = check_for_known_divergences(&mut grouped_events);
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
@@ -826,12 +860,8 @@ mod tests {
         // -   CF: Jump to external code
         // -     CT: External code
         // -   RF: Jump to external code
-        let op = DiffOp::Delete {
-            old_index: 25260,
-            old_len: 10,
-            new_index: 25114,
-        };
-        let mut change_tuples_events = [(
+        let op_tag = DiffTag::Delete;
+        let change_tuples_events = Vec::from([(
             ChangeTag::Delete,
             VecDeque::from([
                 Event::parse("CF: init_repository_format at setup.c:710:33").unwrap(),
@@ -845,8 +875,9 @@ mod tests {
                 Event::parse("CT: External code").unwrap(),
                 Event::parse("RF: Jump to external code").unwrap(),
             ]),
-        )];
-        let divergences = check_for_known_divergences(&op, &mut change_tuples_events);
+        )]);
+        let mut grouped_events = [(op_tag, change_tuples_events)];
+        let divergences = check_for_known_divergences(&mut grouped_events);
         assert_eq!(divergences.len(), 2);
         for divergence in &divergences {
             assert_eq!(
@@ -863,20 +894,17 @@ mod tests {
         // - CF: is_absolute_path at cache.h:1276:32
         // -   CT: git_has_dos_drive_prefix at git-compat-util.h:432:0
         // -   RF: git_has_dos_drive_prefix at git-compat-util.h:433:2
-        let op = DiffOp::Delete {
-            old_index: 75,
-            old_len: 3,
-            new_index: 72,
-        };
-        let mut change_tuples_events = [(
+        let op_tag = DiffTag::Delete;
+        let change_tuples_events = Vec::from([(
             ChangeTag::Delete,
             VecDeque::from([
                 Event::parse("CF: is_absolute_path at cache.h:1276:32").unwrap(),
                 Event::parse("CT: git_has_dos_drive_prefix at git-compat-util.h:432:0").unwrap(),
                 Event::parse("RF: git_has_dos_drive_prefix at git-compat-util.h:433:2").unwrap(),
             ]),
-        )];
-        let divergences = check_for_known_divergences(&op, &mut change_tuples_events);
+        )]);
+        let mut grouped_events = [(op_tag, change_tuples_events)];
+        let divergences = check_for_known_divergences(&mut grouped_events);
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
