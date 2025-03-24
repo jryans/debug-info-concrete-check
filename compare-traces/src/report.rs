@@ -690,28 +690,36 @@ fn check_for_known_divergences(
         if *diff_tag == DiffTag::Equal {
             continue;
         }
-        if change_tuples_events
+        let events_present = change_tuples_events
             .iter()
-            .any(|(_tag, events)| !events.is_empty())
-        {
-            let mut remaining_before_events = vec![];
-            let mut remaining_after_events = vec![];
-            for (change_tag, events) in change_tuples_events {
-                if *change_tag == ChangeTag::Equal {
-                    continue;
+            .any(|(_, events)| !events.is_empty());
+        if events_present {
+            // Look for certain terms that suggest non-determinism
+            static ND_RE: Lazy<Regex> =
+                Lazy::new(|| Regex::new(r"(sig|command|hash|alloc|env)").unwrap());
+            let nondeterminism_found = change_tuples_events
+                .iter()
+                .any(|(_, events)| events.iter().any(|e| ND_RE.is_match(&e.detail)));
+            if !nondeterminism_found {
+                let mut remaining_before_events = vec![];
+                let mut remaining_after_events = vec![];
+                for (change_tag, events) in change_tuples_events {
+                    if *change_tag == ChangeTag::Equal {
+                        continue;
+                    }
+                    let mut collected_events = events.drain(..).collect::<Vec<_>>();
+                    if *change_tag == ChangeTag::Delete {
+                        remaining_before_events.append(&mut collected_events);
+                    } else {
+                        remaining_after_events.append(&mut collected_events);
+                    }
                 }
-                let mut collected_events = events.drain(..).collect::<Vec<_>>();
-                if *change_tag == ChangeTag::Delete {
-                    remaining_before_events.append(&mut collected_events);
-                } else {
-                    remaining_after_events.append(&mut collected_events);
-                }
+                divergences.push(Divergence::new(
+                    DivergenceType::Uncategorised,
+                    remaining_before_events,
+                    remaining_after_events,
+                ));
             }
-            divergences.push(Divergence::new(
-                DivergenceType::Uncategorised,
-                remaining_before_events,
-                remaining_after_events,
-            ));
         }
     }
 
