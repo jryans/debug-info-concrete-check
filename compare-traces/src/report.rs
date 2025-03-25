@@ -138,6 +138,7 @@ enum DivergenceType {
     CoordinatesRemoved,
     CoordinatesChangedSmall,
     CoordinatesChangedLarge,
+    LibraryCallAdded,
     LibraryCallReplaced,
     LibraryCallRemoved,
     // TODO: Refine this by pass, similar to the paper
@@ -151,6 +152,7 @@ impl DivergenceType {
             DivergenceType::CoordinatesRemoved => "coordinates-removed",
             DivergenceType::CoordinatesChangedSmall => "coordinates-changed-small",
             DivergenceType::CoordinatesChangedLarge => "coordinates-changed-large",
+            DivergenceType::LibraryCallAdded => "library-call-added",
             DivergenceType::LibraryCallReplaced => "library-call-replaced",
             DivergenceType::LibraryCallRemoved => "library-call-removed",
             DivergenceType::ProgramCallRemoved => "program-call-removed",
@@ -329,6 +331,84 @@ fn check_for_coordinates_changed(
 
         divergences.push(Divergence::new(
             divergence_type,
+            related_before_events,
+            related_after_events,
+        ));
+    }
+
+    divergences
+}
+
+// Example diff:
+// + CF: strbuf_init at strbuf.c:57:2
+// +   CT: Jump to external code
+// +   CF: Jump to external code
+// +     CT: External code
+// +   RF: Jump to external code
+fn check_for_library_call_added(
+    grouped_events: &mut [(DiffTag, Vec<(ChangeTag, VecDeque<Event>)>)],
+) -> Vec<Divergence> {
+    let mut divergences = vec![];
+
+    for (diff_tag, change_tuples_events) in grouped_events {
+        // Diff op for this region should be insert
+        if *diff_tag != DiffTag::Insert {
+            continue;
+        }
+
+        // Should have a single tuple with inserted lines
+        assert!(change_tuples_events.len() == 1);
+        let (change_tag, events) = &mut change_tuples_events[0];
+        assert!(*change_tag == ChangeTag::Insert);
+
+        // Must have at least 5 events
+        if events.len() < 5 {
+            continue;
+        }
+
+        // First event should be call from traced binary
+        if events[0].event_type != EventType::CallFrom {
+            continue;
+        }
+
+        // Second event should be call to external library
+        if events[1].event_type != EventType::CallTo {
+            continue;
+        }
+        if !events[1].detail.to_lowercase().contains("external code") {
+            continue;
+        }
+
+        // There should be 3 more events mentioning external code
+        let mut external_remaining: usize = 3;
+        for i in 2..5 {
+            if !events[i].detail.to_lowercase().contains("external code") {
+                break;
+            }
+            external_remaining -= 1;
+        }
+        if external_remaining > 0 {
+            continue;
+        }
+
+        // Extract related events
+        let related_before_events = vec![];
+        let mut related_after_events = vec![];
+
+        // First two are known to match
+        related_after_events.push(events.pop_front().unwrap());
+        related_after_events.push(events.pop_front().unwrap());
+
+        // Also take any more contiguous events about external code
+        while !events.is_empty() {
+            if !events[0].detail.to_lowercase().contains("external code") {
+                break;
+            }
+            related_after_events.push(events.pop_front().unwrap());
+        }
+
+        divergences.push(Divergence::new(
+            DivergenceType::LibraryCallAdded,
             related_before_events,
             related_after_events,
         ));
@@ -663,6 +743,13 @@ fn check_for_known_divergences(
             }
         }
         {
+            let mut divergences_found = check_for_library_call_added(grouped_events);
+            if !divergences_found.is_empty() {
+                divergences.append(&mut divergences_found);
+                continue_checking = true;
+            }
+        }
+        {
             let mut divergences_found = check_for_library_call_replaced(grouped_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
@@ -930,7 +1017,13 @@ pub fn print_before_events_by_type(
 
     for divergence in divergence_stats_by_coordinates.keys() {
         let mut file = &files_by_type[&divergence.divergence_type];
-        for event in &divergence.before_events {
+        let printable_events = match &divergence.divergence_type {
+            // In the less common case of only added events,
+            // let's use those so we at least have something to count
+            DivergenceType::LibraryCallAdded => &divergence.after_events,
+            _ => &divergence.before_events,
+        };
+        for event in printable_events {
             writeln!(file, "{}", event)?;
         }
     }
