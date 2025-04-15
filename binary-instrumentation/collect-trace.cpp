@@ -520,7 +520,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       *trace << "Aligning inlined chain\n";
       *trace << "Oldest chain link: " << oldestChainLink.getShortName() << "\n";
     }
-    size_t stackIdxOldestChainLink = SIZE_T_MAX;
+    size_t stackIdxOldestChainLink = SIZE_MAX;
     for (size_t i = stack.size(); i--;) {
       const auto &entry = stack[i].entry;
       if (verbose)
@@ -532,10 +532,10 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     }
     // As long as the stack is not empty,
     // we should always find at least one chain link in the stack
-    assert(stackIdxOldestChainLink != SIZE_T_MAX);
+    assert(stackIdxOldestChainLink != SIZE_MAX);
 
     // Pop any stack frames not found in the new inlined chain
-    size_t chainIdxNewestMatchingStack = SIZE_T_MAX;
+    size_t chainIdxNewestMatchingStack = SIZE_MAX;
     size_t stackItemsToCheck = stack.size() - stackIdxOldestChainLink;
     if (verbose)
       *trace << "Popping any frames not found\n";
@@ -560,7 +560,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     }
     // From the alignment block above,
     // we know there must be at least one chain link in the stack
-    assert(chainIdxNewestMatchingStack != SIZE_T_MAX);
+    assert(chainIdxNewestMatchingStack != SIZE_MAX);
 
     // Push any new frames beyond what is already in the stack
     if (verbose)
