@@ -12,7 +12,7 @@ using namespace llvm::object;
 
 // Borrowed from LLVM's `MachODump.cpp`
 std::optional<StringRef>
-findIndirectSymbolNameMacho(uint64_t address, const MachOObjectFile &objFile) {
+findDynamicFunctionNameMachO(uint64_t address, const MachOObjectFile &objFile) {
   MachO::dysymtab_command dysymtab = objFile.getDysymtabLoadCommand();
   MachO::symtab_command symtab = objFile.getSymtabLoadCommand();
   for (const auto &load : objFile.load_commands()) {

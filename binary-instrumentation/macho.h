@@ -10,7 +10,7 @@
 
 // Borrowed from LLVM's `MachODump.cpp`
 std::optional<llvm::StringRef>
-findIndirectSymbolNameMacho(uint64_t address,
-                            const llvm::object::MachOObjectFile &objFile);
+findDynamicFunctionNameMachO(uint64_t address,
+                             const llvm::object::MachOObjectFile &objFile);
 
 #endif // MACHO_H

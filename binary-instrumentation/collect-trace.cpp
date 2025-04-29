@@ -237,14 +237,14 @@ bool isLocationPrintable(const EventType &type) {
   return true;
 }
 
-std::optional<StringRef> findIndirectSymbolName(QBDI::rword address) {
+std::optional<StringRef> findDynamicFunctionName(QBDI::rword address) {
   const auto &execObjectFile = cast<object::ObjectFile>(*execBinary);
   // Cached here via `static`
-  static const bool isMacho = execObjectFile.isMachO();
-  if (!isMacho)
-    return std::nullopt;
-  return findIndirectSymbolNameMacho(
-      address, cast<object::MachOObjectFile>(execObjectFile));
+  static const bool isMachO = execObjectFile.isMachO();
+  if (isMachO)
+    return findDynamicFunctionNameMachO(
+        address, cast<object::MachOObjectFile>(execObjectFile));
+  return std::nullopt;
 }
 
 void printEventFromLineInfo(
@@ -283,7 +283,7 @@ void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
         (*vm)->getCachedInstAnalysis(*address)->isBranch) {
       *trace << "Jump to external code";
       const std::optional<StringRef> symbolName =
-          findIndirectSymbolName(*address);
+          findDynamicFunctionName(*address);
       if (symbolName)
         *trace << " for " << symbolName;
     } else if (address && !isAddressInCurrentModule(*address)) {
