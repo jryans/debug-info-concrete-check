@@ -5,7 +5,6 @@
 #include <optional>
 
 #include "llvm/ADT/StringRef.h"
-#include "llvm/BinaryFormat/MachO.h"
 #include "llvm/Object/MachO.h"
 
 // Borrowed from LLVM's `MachODump.cpp`
