@@ -20,6 +20,7 @@
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/DebugInfo/DWARF/DWARFDie.h"
 #include "llvm/Object/Binary.h"
+#include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Error.h"
@@ -29,10 +30,12 @@
 #include "llvm/Support/Format.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "QBDIPreload.h"
 
+#include "elf.h"
 #include "macho.h"
 #include "trace-debug.h"
 
@@ -241,7 +244,11 @@ bool isLocationPrintable(const EventType &type) {
 std::optional<StringRef> findDynamicFunctionName(QBDI::rword address) {
   const auto &execObjectFile = cast<object::ObjectFile>(*execBinary);
   // Cached here via `static`
+  static const bool isELF = execObjectFile.isELF();
   static const bool isMachO = execObjectFile.isMachO();
+  if (isELF)
+    return findDynamicFunctionNameELF(
+        address, cast<object::ELFObjectFileBase>(execObjectFile));
   if (isMachO)
     return findDynamicFunctionNameMachO(
         address, cast<object::MachOObjectFile>(execObjectFile));
@@ -809,6 +816,13 @@ bool loadExecutable(const Twine &execPath) {
     errs() << "Error: Unexpected object file type "
               "containing executable\n";
     return false;
+  }
+
+  if (execBinary->isELF()) {
+    // Used by `findDynamicFunctionNameELF`
+    // Adding additional targets here may work, but currently untested
+    LLVMInitializeX86TargetInfo();
+    LLVMInitializeX86TargetMC();
   }
 
   return true;

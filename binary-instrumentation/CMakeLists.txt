@@ -19,6 +19,7 @@ find_package(QBDIPreload REQUIRED)
 
 add_library(collect-trace-preload SHARED
   collect-trace.cpp
+  elf.cpp
   macho.cpp
 )
 
@@ -67,6 +68,7 @@ set(LLVM_COMPONENTS
   DebugInfoDWARF
   Object
   Support
+  X86
 )
 get_llvm_libs(LLVM_LIBS ${LLVM_COMPONENTS})
 target_link_libraries(collect-trace-preload PRIVATE
