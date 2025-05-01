@@ -33,9 +33,11 @@
               ninja
               python3
               rustc
+              rustfmt
               zlib
               zstd
             ];
+            RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
           };
         }
       );
