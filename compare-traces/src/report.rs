@@ -161,12 +161,17 @@ impl DivergenceType {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Divergence {
     divergence_type: DivergenceType,
     before_events: Vec<Event>,
     after_events: Vec<Event>,
     pass_responsible: Option<String>,
+
+    // Excluded from key (intended for trace debugging)
+    // 1-based line indices
+    old_index: usize,
+    new_index: usize,
 }
 
 impl Divergence {
@@ -174,13 +179,26 @@ impl Divergence {
         divergence_type: DivergenceType,
         before_events: Vec<Event>,
         after_events: Vec<Event>,
+        diff_op: &DiffOp,
     ) -> Divergence {
         Divergence {
             divergence_type,
             before_events,
             after_events,
             pass_responsible: None,
+            old_index: diff_op.old_range().start + 1,
+            new_index: diff_op.new_range().start + 1,
         }
+    }
+
+    // JRS: Should the key really just be `location` below...?
+    fn key(&self) -> (&DivergenceType, &Vec<Event>, &Vec<Event>, &Option<String>) {
+        (
+            &self.divergence_type,
+            &self.before_events,
+            &self.after_events,
+            &self.pass_responsible,
+        )
     }
 
     fn location(&self) -> &Location {
@@ -194,17 +212,37 @@ impl Divergence {
     }
 }
 
+impl PartialEq for Divergence {
+    fn eq(&self, other: &Self) -> bool {
+        self.key() == other.key()
+    }
+}
+
+impl Eq for Divergence {}
+
+impl PartialOrd for Divergence {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Divergence {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.key().cmp(&other.key())
+    }
+}
+
 // Example diff:
 // < CF: getnanotime at trace.c:397:18
 // > CF: getnanotime at trace.c:0:0
 fn check_for_coordinates_removed(
-    grouped_events: &mut [(DiffTag, Vec<(ChangeTag, VecDeque<Event>)>)],
+    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
-    for (diff_tag, change_tuples_events) in grouped_events {
+    for (diff_op, change_tuples_events) in grouped_events {
         // Diff op for this region should be replace
-        if *diff_tag != DiffTag::Replace {
+        if diff_op.tag() != DiffTag::Replace {
             continue;
         }
 
@@ -249,6 +287,7 @@ fn check_for_coordinates_removed(
             DivergenceType::CoordinatesRemoved,
             related_before_events,
             related_after_events,
+            diff_op,
         ));
     }
 
@@ -259,13 +298,13 @@ fn check_for_coordinates_removed(
 // < CT: xstrdup_or_null at git-compat-util.h:1168:0
 // > CT: xstrdup_or_null at git-compat-util.h:1169:9
 fn check_for_coordinates_changed(
-    grouped_events: &mut [(DiffTag, Vec<(ChangeTag, VecDeque<Event>)>)],
+    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
-    for (diff_tag, change_tuples_events) in grouped_events {
+    for (diff_op, change_tuples_events) in grouped_events {
         // Diff op for this region should be replace
-        if *diff_tag != DiffTag::Replace {
+        if diff_op.tag() != DiffTag::Replace {
             continue;
         }
 
@@ -333,6 +372,7 @@ fn check_for_coordinates_changed(
             divergence_type,
             related_before_events,
             related_after_events,
+            diff_op,
         ));
     }
 
@@ -346,13 +386,13 @@ fn check_for_coordinates_changed(
 // +     CT: External code
 // +   RF: Jump to external code
 fn check_for_library_call_added(
-    grouped_events: &mut [(DiffTag, Vec<(ChangeTag, VecDeque<Event>)>)],
+    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
-    for (diff_tag, change_tuples_events) in grouped_events {
+    for (diff_op, change_tuples_events) in grouped_events {
         // Diff op for this region should be insert
-        if *diff_tag != DiffTag::Insert {
+        if diff_op.tag() != DiffTag::Insert {
             continue;
         }
 
@@ -411,6 +451,7 @@ fn check_for_library_call_added(
             DivergenceType::LibraryCallAdded,
             related_before_events,
             related_after_events,
+            diff_op,
         ));
     }
 
@@ -428,7 +469,7 @@ fn check_for_library_call_added(
 // < RF: Jump to external code for ___vsnprintf_chk
 // > RF: Jump to external code for _vsnprintf
 fn check_for_library_call_replaced(
-    grouped_events: &mut [(DiffTag, Vec<(ChangeTag, VecDeque<Event>)>)],
+    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
@@ -437,10 +478,10 @@ fn check_for_library_call_replaced(
     let mut unchanged_call_to_slot = None;
     let mut changed_return_from_slot = None;
 
-    for (diff_tag, change_tuples_events) in grouped_events {
+    for (diff_op, change_tuples_events) in grouped_events {
         // Look for an unchanged call from
         if unchanged_call_from_slot.is_none() {
-            if *diff_tag != DiffTag::Equal {
+            if diff_op.tag() != DiffTag::Equal {
                 continue;
             }
             assert!(change_tuples_events.len() == 1);
@@ -459,7 +500,7 @@ fn check_for_library_call_replaced(
 
         // Look for changed external call from and to
         if changed_call_slot.is_none() {
-            if *diff_tag != DiffTag::Replace {
+            if diff_op.tag() != DiffTag::Replace {
                 unchanged_call_from_slot = None;
                 continue;
             }
@@ -487,7 +528,7 @@ fn check_for_library_call_replaced(
         // Look for unchanged call to
         // TODO: Perhaps make this optional...?
         if unchanged_call_to_slot.is_none() {
-            if *diff_tag != DiffTag::Equal {
+            if diff_op.tag() != DiffTag::Equal {
                 unchanged_call_from_slot = None;
                 changed_call_slot = None;
                 continue;
@@ -513,7 +554,7 @@ fn check_for_library_call_replaced(
         // Look for changed external return from
         // TODO: Perhaps make this optional...?
         if changed_return_from_slot.is_none() {
-            if *diff_tag != DiffTag::Replace {
+            if diff_op.tag() != DiffTag::Replace {
                 unchanged_call_from_slot = None;
                 changed_call_slot = None;
                 unchanged_call_to_slot = None;
@@ -587,6 +628,7 @@ fn check_for_library_call_replaced(
             DivergenceType::LibraryCallReplaced,
             related_before_events,
             related_after_events,
+            diff_op,
         ));
 
         unchanged_call_from_slot = None;
@@ -605,13 +647,13 @@ fn check_for_library_call_replaced(
 // -     CT: External code
 // -   RF: Jump to external code
 fn check_for_library_call_removed(
-    grouped_events: &mut [(DiffTag, Vec<(ChangeTag, VecDeque<Event>)>)],
+    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
-    for (diff_tag, change_tuples_events) in grouped_events {
+    for (diff_op, change_tuples_events) in grouped_events {
         // Diff op for this region should be delete
-        if *diff_tag != DiffTag::Delete {
+        if diff_op.tag() != DiffTag::Delete {
             continue;
         }
 
@@ -658,6 +700,7 @@ fn check_for_library_call_removed(
             DivergenceType::LibraryCallRemoved,
             related_before_events,
             related_after_events,
+            diff_op,
         ));
     }
 
@@ -669,13 +712,13 @@ fn check_for_library_call_removed(
 // -   CT: git_has_dos_drive_prefix at git-compat-util.h:432:0
 // -   RF: git_has_dos_drive_prefix at git-compat-util.h:433:2
 fn check_for_program_call_removed(
-    grouped_events: &mut [(DiffTag, Vec<(ChangeTag, VecDeque<Event>)>)],
+    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
-    for (diff_tag, change_tuples_events) in grouped_events {
+    for (diff_op, change_tuples_events) in grouped_events {
         // Diff op for this region should be delete
-        if *diff_tag != DiffTag::Delete {
+        if diff_op.tag() != DiffTag::Delete {
             continue;
         }
 
@@ -712,6 +755,7 @@ fn check_for_program_call_removed(
             DivergenceType::ProgramCallRemoved,
             related_before_events,
             related_after_events,
+            diff_op,
         ));
     }
 
@@ -719,7 +763,7 @@ fn check_for_program_call_removed(
 }
 
 fn check_for_known_divergences(
-    grouped_events: &mut [(DiffTag, Vec<(ChangeTag, VecDeque<Event>)>)],
+    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
@@ -773,8 +817,8 @@ fn check_for_known_divergences(
     }
 
     // If any events remain, record an unknown divergence
-    for (diff_tag, change_tuples_events) in grouped_events {
-        if *diff_tag == DiffTag::Equal {
+    for (diff_op, change_tuples_events) in grouped_events {
+        if diff_op.tag() == DiffTag::Equal {
             continue;
         }
         let events_present = change_tuples_events
@@ -805,6 +849,7 @@ fn check_for_known_divergences(
                     DivergenceType::Uncategorised,
                     remaining_before_events,
                     remaining_after_events,
+                    diff_op,
                 ));
             }
         }
@@ -872,7 +917,7 @@ pub fn analyse_and_print_report(
             // println!();
         }
 
-        let mut grouped_events: Vec<(DiffTag, Vec<(ChangeTag, VecDeque<Event>)>)> = vec![];
+        let mut grouped_events: Vec<(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)> = vec![];
 
         for op in op_group {
             // TODO: Skip unnecessary collects / copies
@@ -913,7 +958,7 @@ pub fn analyse_and_print_report(
                 println!();
             }
 
-            grouped_events.push((op.tag(), change_tuples_events));
+            grouped_events.push((op, change_tuples_events));
         }
 
         // Check events against known divergence patterns
@@ -969,6 +1014,12 @@ pub fn analyse_and_print_report(
         println!("  Occurrences: {}", occurrences);
         if let Some(pass) = &divergence.pass_responsible {
             println!("  Pass responsible: {}", pass);
+        }
+        if log_enabled!(log::Level::Info) {
+            println!(
+                "  Example trace lines: -{}, +{}",
+                divergence.old_index, divergence.new_index
+            );
         }
         println!();
         if let Some(count) =
@@ -1050,7 +1101,12 @@ mod tests {
         // Example diff:
         // < CF: getnanotime at trace.c:397:18
         // > CF: getnanotime at trace.c:0:0
-        let op_tag = DiffTag::Replace;
+        let op = DiffOp::Replace {
+            old_index: 0,
+            old_len: 1,
+            new_index: 0,
+            new_len: 1,
+        };
         let change_tuples_events = Vec::from([
             (
                 ChangeTag::Delete,
@@ -1061,7 +1117,7 @@ mod tests {
                 VecDeque::from([Event::parse("CF: getnanotime at trace.c:0:0").unwrap()]),
             ),
         ]);
-        let mut grouped_events = [(op_tag, change_tuples_events)];
+        let mut grouped_events = [(op, change_tuples_events)];
         let divergences = check_for_known_divergences(&mut grouped_events);
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
@@ -1082,7 +1138,12 @@ mod tests {
         // Example diff:
         // < CT: xstrdup_or_null at git-compat-util.h:1168:0
         // > CT: xstrdup_or_null at git-compat-util.h:1169:9
-        let op_tag = DiffTag::Replace;
+        let op = DiffOp::Replace {
+            old_index: 0,
+            old_len: 1,
+            new_index: 0,
+            new_len: 1,
+        };
         let change_tuples_events = Vec::from([
             (
                 ChangeTag::Delete,
@@ -1097,7 +1158,7 @@ mod tests {
                 ]),
             ),
         ]);
-        let mut grouped_events = [(op_tag, change_tuples_events)];
+        let mut grouped_events = [(op, change_tuples_events)];
         let divergences = check_for_known_divergences(&mut grouped_events);
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
@@ -1121,7 +1182,11 @@ mod tests {
         // -   CF: Jump to external code
         // -     CT: External code
         // -   RF: Jump to external code
-        let op_tag = DiffTag::Delete;
+        let op = DiffOp::Delete {
+            old_index: 0,
+            old_len: 5,
+            new_index: 0,
+        };
         let change_tuples_events = Vec::from([(
             ChangeTag::Delete,
             VecDeque::from([
@@ -1132,7 +1197,7 @@ mod tests {
                 Event::parse("RF: Jump to external code").unwrap(),
             ]),
         )]);
-        let mut grouped_events = [(op_tag, change_tuples_events)];
+        let mut grouped_events = [(op, change_tuples_events)];
         let divergences = check_for_known_divergences(&mut grouped_events);
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
@@ -1156,7 +1221,11 @@ mod tests {
         // -   CF: Jump to external code
         // -     CT: External code
         // -   RF: Jump to external code
-        let op_tag = DiffTag::Delete;
+        let op = DiffOp::Delete {
+            old_index: 0,
+            old_len: 10,
+            new_index: 0,
+        };
         let change_tuples_events = Vec::from([(
             ChangeTag::Delete,
             VecDeque::from([
@@ -1172,7 +1241,7 @@ mod tests {
                 Event::parse("RF: Jump to external code").unwrap(),
             ]),
         )]);
-        let mut grouped_events = [(op_tag, change_tuples_events)];
+        let mut grouped_events = [(op, change_tuples_events)];
         let divergences = check_for_known_divergences(&mut grouped_events);
         assert_eq!(divergences.len(), 2);
         for divergence in &divergences {
@@ -1190,7 +1259,11 @@ mod tests {
         // - CF: is_absolute_path at cache.h:1276:32
         // -   CT: git_has_dos_drive_prefix at git-compat-util.h:432:0
         // -   RF: git_has_dos_drive_prefix at git-compat-util.h:433:2
-        let op_tag = DiffTag::Delete;
+        let op = DiffOp::Delete {
+            old_index: 0,
+            old_len: 3,
+            new_index: 0,
+        };
         let change_tuples_events = Vec::from([(
             ChangeTag::Delete,
             VecDeque::from([
@@ -1199,7 +1272,7 @@ mod tests {
                 Event::parse("RF: git_has_dos_drive_prefix at git-compat-util.h:433:2").unwrap(),
             ]),
         )]);
-        let mut grouped_events = [(op_tag, change_tuples_events)];
+        let mut grouped_events = [(op, change_tuples_events)];
         let divergences = check_for_known_divergences(&mut grouped_events);
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
