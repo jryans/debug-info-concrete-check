@@ -857,6 +857,7 @@ fn print_events(events: &Vec<Event>) {
 pub fn analyse_and_print_report(
     diff: &TextDiff<'_, '_, '_, str>,
     remarks_by_location: &Option<HashMap<Location, Remark>>,
+    tweak_event_alignment: bool,
 ) -> BTreeMap<Divergence, u64> {
     println!("Analysing divergences…");
     println!();
@@ -882,11 +883,13 @@ pub fn analyse_and_print_report(
 
             // Fix up alignment where possible
             // JRS: Maybe remove this by using the previous line from context...?
-            if tweak_alignment(&op, &mut change_tuples_strings) {
-                if log_enabled!(log::Level::Debug) {
-                    println!("Alignment tweaked, new ordering:");
-                    print_change_vec(&op, &change_tuples_strings);
-                    println!();
+            if tweak_event_alignment {
+                if tweak_alignment(&op, &mut change_tuples_strings) {
+                    if log_enabled!(log::Level::Debug) {
+                        println!("Alignment tweaked, new ordering:");
+                        print_change_vec(&op, &change_tuples_strings);
+                        println!();
+                    }
                 }
             }
 

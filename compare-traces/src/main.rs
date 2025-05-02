@@ -38,6 +38,10 @@ struct Cli {
     #[arg(long, default_value_t = true)]
     report: bool,
 
+    /// Tweak event alignment to improve text diffing results
+    #[arg(long)]
+    tweak_event_alignment: bool,
+
     #[command(flatten)]
     verbose: clap_verbosity_flag::Verbosity,
 
@@ -81,7 +85,8 @@ fn main() -> Result<()> {
     }
 
     if cli.report {
-        let divergence_stats_by_coordinates = analyse_and_print_report(&diff, &remarks_by_location);
+        let divergence_stats_by_coordinates =
+            analyse_and_print_report(&diff, &remarks_by_location, cli.tweak_event_alignment);
         if let Some(events_by_type_dir) = cli.events_by_type_dir {
             if !events_by_type_dir.is_dir() {
                 return Err(anyhow!(
