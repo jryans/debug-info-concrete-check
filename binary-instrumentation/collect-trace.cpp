@@ -868,8 +868,16 @@ int qbdipreload_on_main(int argc, char **argv) {
   StringRef execPath(argv[0]);
   if (!loadExecutable(execPath))
     return QBDIPRELOAD_ERR_STARTUP_FAILED;
-  if (!loadDWARFDebugInfo(execPath + ".dwarf"))
-    return QBDIPRELOAD_ERR_STARTUP_FAILED;
+
+  // Try loading debug info from a separate file first (helpful on macOS),
+  // then fallback to executable.
+  if (llvm::sys::fs::exists(execPath + ".dwarf")) {
+    if (!loadDWARFDebugInfo(execPath + ".dwarf"))
+      return QBDIPRELOAD_ERR_STARTUP_FAILED;
+  } else {
+    if (!loadDWARFDebugInfo(execPath))
+      return QBDIPRELOAD_ERR_STARTUP_FAILED;
+  }
 
   // Leave this as "not handled" so the default handler will still run,
   // which starts up the QBDI instrumentation VM.
