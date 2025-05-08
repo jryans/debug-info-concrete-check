@@ -6,11 +6,11 @@ use anyhow::{anyhow, Context, Ok, Result};
 use clap::Parser;
 use similar::TextDiff;
 
-use crate::diff::print_diff;
+use crate::print::print_diff;
 use crate::remarks::{load_remarks, Remark};
 use crate::report::{analyse_and_print_report, print_before_events_by_type, Location};
 
-mod diff;
+mod print;
 mod remarks;
 mod report;
 

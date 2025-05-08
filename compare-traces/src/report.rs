@@ -15,7 +15,7 @@ use regex::Regex;
 use similar::{ChangeTag, DiffOp, DiffTag, TextDiff};
 
 use crate::{
-    diff::{print_change_group, print_change_vec},
+    print::{print_change_group, print_change_vec},
     remarks::Remark,
 };
 
