@@ -30,6 +30,7 @@
             packages = with pkgs; [
               cargo
               cmake
+              lldb
               ninja
               python3
               rustc
