@@ -3,7 +3,7 @@ use std::time::Duration;
 use std::{fs, path::PathBuf};
 
 use anyhow::{anyhow, Context, Ok, Result};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use similar::TextDiff;
 
 use crate::print::print_diff;
@@ -13,6 +13,15 @@ use crate::report::{analyse_and_print_report, print_before_events_by_type, Locat
 mod print;
 mod remarks;
 mod report;
+mod tree;
+
+#[derive(ValueEnum, Clone, Debug)]
+enum DiffStrategy {
+    /// Textual diff using the patience algorithm
+    Text,
+    /// Tree / structural diff
+    Tree,
+}
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -37,6 +46,10 @@ struct Cli {
     /// Analyse and report trace divergences
     #[arg(long, default_value_t = true)]
     report: bool,
+
+    /// Strategy to use when comparing traces to reveal divergences
+    #[arg(long, value_enum, default_value_t = DiffStrategy::Tree)]
+    diff_strategy: DiffStrategy,
 
     /// Tweak event alignment to improve text diffing results
     #[arg(long)]
