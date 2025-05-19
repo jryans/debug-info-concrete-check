@@ -266,4 +266,49 @@ CF: all_attrs_init at attr.c:155:3
             assert!(false);
         }
     }
+
+    #[test]
+    fn remove_nested_tree() {
+        // Adapted from Git's `log` trace
+        // Nested call to `git_has_dos_drive_prefix` removed
+        // TODO: Fix our algorithm to get this working
+        // (currently replaces line 5 instead of removing)
+
+        let before_content = "
+CF: system_path at exec-cmd.c:265:6
+  CT: is_absolute_path at cache.h:1275:0
+  CF: is_absolute_path at cache.h:1276:9
+    CT: git_is_dir_sep at git-compat-util.h:447:0
+    RF: git_is_dir_sep at git-compat-util.h:448:2
+  CF: is_absolute_path at cache.h:1276:32
+    CT: git_has_dos_drive_prefix at git-compat-util.h:432:0
+    RF: git_has_dos_drive_prefix at git-compat-util.h:433:2
+  RF: is_absolute_path at cache.h:1276:2
+CF: system_path at exec-cmd.c:268:27
+  CT: system_prefix at exec-cmd.c:247:0
+  RF: system_prefix at exec-cmd.c:248:2"
+            .trim();
+        let after_content = "
+CF: system_path at exec-cmd.c:265:6
+  CT: is_absolute_path at cache.h:1275:0
+  CF: is_absolute_path at cache.h:1276:9
+    CT: git_is_dir_sep at git-compat-util.h:447:0
+    RF: git_is_dir_sep at git-compat-util.h:448:2
+  RF: is_absolute_path at cache.h:1276:2
+CF: system_path at exec-cmd.c:268:27
+  CT: system_prefix at exec-cmd.c:247:0
+  RF: system_prefix at exec-cmd.c:248:2"
+            .trim();
+
+        let diff = diff_tree(before_content, after_content);
+        println!("{:?}", &diff);
+
+        assert!(diff.ops.len() > 0);
+        let diff_op = diff.ops.last().unwrap();
+        if let TreeDiffOp::Remove { before_index } = diff_op {
+            assert!(*before_index == 5);
+        } else {
+            assert!(false);
+        }
+    }
 }
