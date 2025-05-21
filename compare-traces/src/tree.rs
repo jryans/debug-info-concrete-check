@@ -34,6 +34,18 @@ impl TreeNode {
             children: Vec::new(),
         }
     }
+
+    fn child<'tree>(&self, tree: &'tree Tree, nth: usize) -> &'tree TreeNode {
+        &tree[&self.children[nth]]
+    }
+
+    fn last_child<'tree>(&self, tree: &'tree Tree) -> &'tree TreeNode {
+        &tree[self.children.last().unwrap()]
+    }
+
+    fn data<'container, T>(&self, container: &'container [T]) -> &'container T {
+        &container[self.index.unwrap()]
+    }
 }
 
 /// Tree built from / overlaid onto a separate array.
@@ -83,7 +95,7 @@ impl Tree {
                 assert!(item_depth == stack_depth + 1);
                 let stack_top = &tree[stack.last().unwrap()];
                 assert!(stack_top.children.len() > 0);
-                stack.push(tree[stack_top.children.last().unwrap()].index);
+                stack.push(stack_top.last_child(&tree).index);
             } else if item_depth < stack_depth {
                 assert!(item_depth == stack_depth - 1);
                 stack.pop();
@@ -358,13 +370,13 @@ mod tests {
             .collect();
         let tree = Tree::from_indented_items(&items);
         let root = &tree.root;
-        let node_0 = &tree[&root.children[0]];
-        assert_eq!(items[node_0.index.unwrap()].trim(), "0");
-        let node_0_1 = &tree[&node_0.children[1]];
-        assert_eq!(items[node_0_1.index.unwrap()].trim(), "0.1");
-        let node_1 = &tree[&root.children[1]];
-        let node_1_0 = &tree[&node_1.children[0]];
-        assert_eq!(items[node_1_0.index.unwrap()].trim(), "1.0");
+        let node_0 = root.child(&tree, 0);
+        assert_eq!(node_0.data(&items).trim(), "0");
+        let node_0_1 = node_0.child(&tree, 1);
+        assert_eq!(node_0_1.data(&items).trim(), "0.1");
+        let node_1 = root.child(&tree, 1);
+        let node_1_0 = node_1.child(&tree, 0);
+        assert_eq!(node_1_0.data(&items).trim(), "1.0");
     }
 
     #[test]
