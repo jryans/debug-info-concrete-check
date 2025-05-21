@@ -1,3 +1,5 @@
+use std::ops::{Index, IndexMut};
+
 use once_cell::sync::Lazy;
 use regex::Regex;
 use similar::TextDiff;
@@ -108,6 +110,113 @@ fn compare_frames(
     }
 
     tree_diff_ops
+}
+
+/// `None` is reserved for the root node.
+/// This allows nodes indices to remain in sync with those for the separate data array.
+type TreeNodeIndex = Option<usize>;
+
+struct TreeNode {
+    index: TreeNodeIndex,
+    children: Vec<TreeNodeIndex>,
+}
+
+impl TreeNode {
+    fn new(index: usize) -> TreeNode {
+        TreeNode {
+            index: Some(index),
+            children: Vec::new(),
+        }
+    }
+
+    fn new_root() -> TreeNode {
+        TreeNode {
+            index: None,
+            children: Vec::new(),
+        }
+    }
+}
+
+/// Tree built from / overlaid onto a separate array.
+/// Node data is accessed by indexing into that array.
+struct Tree {
+    root: TreeNode,
+    /// All non-root nodes.
+    /// `nodes` indices correspond to the same items as those
+    /// with the same index in the separate array.
+    nodes: Vec<TreeNode>,
+}
+
+impl Tree {
+    fn new() -> Tree {
+        let root = TreeNode::new_root();
+        Tree {
+            root,
+            nodes: Vec::new(),
+        }
+    }
+
+    fn root_index() -> TreeNodeIndex {
+        None
+    }
+
+    fn register(&mut self, node: TreeNode) -> TreeNodeIndex {
+        let index = node.index;
+        self.nodes.push(node);
+        index
+    }
+
+    /// Build a tree from indented items
+    fn from_indented_items(items: &[&str]) -> Tree {
+        assert!(items.len() > 0);
+        assert!(line_depth(items[0]) == 1);
+
+        let mut tree = Tree::new();
+        // Temporary stack tracking indentation as we build the tree
+        let mut stack: Vec<TreeNodeIndex> = Vec::new();
+        stack.push(Tree::root_index());
+
+        for i in 0..items.len() {
+            let item = items[i];
+            let item_depth = line_depth(item);
+            let stack_depth = stack.len();
+            if item_depth > stack_depth {
+                assert!(item_depth == stack_depth + 1);
+                let stack_top = &tree[stack.last().unwrap()];
+                assert!(stack_top.children.len() > 0);
+                stack.push(tree[stack_top.children.last().unwrap()].index);
+            } else if item_depth < stack_depth {
+                assert!(item_depth == stack_depth - 1);
+                stack.pop();
+            }
+            let node = TreeNode::new(i);
+            let node_index = tree.register(node);
+            let stack_top = &mut tree[stack.last().unwrap()];
+            stack_top.children.push(node_index);
+        }
+
+        tree
+    }
+}
+
+impl Index<&TreeNodeIndex> for Tree {
+    type Output = TreeNode;
+
+    fn index(&self, index: &TreeNodeIndex) -> &Self::Output {
+        match *index {
+            Some(i) => &self.nodes[i],
+            None => &self.root,
+        }
+    }
+}
+
+impl IndexMut<&TreeNodeIndex> for Tree {
+    fn index_mut(&mut self, index: &TreeNodeIndex) -> &mut Self::Output {
+        match *index {
+            Some(i) => &mut self.nodes[i],
+            None => &mut self.root,
+        }
+    }
 }
 
 pub fn diff_tree<'content>(
@@ -232,6 +341,31 @@ pub fn diff_tree<'content>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tree_from_indented_items() {
+        let items: Vec<_> = "
+0
+  0.0
+    0.0.0
+  0.1
+  0.2
+1
+  1.0
+    1.0.0"
+            .trim()
+            .lines()
+            .collect();
+        let tree = Tree::from_indented_items(&items);
+        let root = &tree.root;
+        let node_0 = &tree[&root.children[0]];
+        assert_eq!(items[node_0.index.unwrap()].trim(), "0");
+        let node_0_1 = &tree[&node_0.children[1]];
+        assert_eq!(items[node_0_1.index.unwrap()].trim(), "0.1");
+        let node_1 = &tree[&root.children[1]];
+        let node_1_0 = &tree[&node_1.children[0]];
+        assert_eq!(items[node_1_0.index.unwrap()].trim(), "1.0");
+    }
 
     #[test]
     fn remove_follows_tree_semantics() {
