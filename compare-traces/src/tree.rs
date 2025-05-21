@@ -4,112 +4,11 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use similar::TextDiff;
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
-pub enum TreeDiffOp {
-    Add {
-        /// Index of added line in after content
-        after_index: usize,
-    },
-    Remove {
-        /// Index of removed line in before content
-        before_index: usize,
-    },
-    Replace {
-        /// Index of replaced line in before content
-        before_index: usize,
-        /// Index of replaced line in after content
-        after_index: usize,
-    },
-    // // JRS: Unclear if we'll actually support this...
-    // Reorder {
-    //     /// Index of reordered line in before content
-    //     before_index: usize,
-    //     /// Index of reordered line in after content
-    //     after_index: usize,
-    //     // JRS: Do we also want indices within their stack frame?
-    // },
-}
-
-#[derive(Debug)]
-pub struct TreeDiff<'content> {
-    before_lines: Vec<&'content str>,
-    after_lines: Vec<&'content str>,
-    ops: Vec<TreeDiffOp>,
-}
-
 /// Computes 1-based depth of a single line.
 /// Assumes 2 space indentation is used.
 fn line_depth(line: &str) -> usize {
     static INDENT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^ *").unwrap());
     INDENT_RE.captures(line).map_or(0, |c| c[0].len() / 2) + 1
-}
-
-fn compare_frames(
-    before_frame: Vec<(usize, &str)>,
-    after_frame: Vec<(usize, &str)>,
-) -> Vec<TreeDiffOp> {
-    let mut tree_diff_ops = Vec::new();
-
-    // Create faux documents for text diffing
-    // JRS: There's surely a better way to diff the frames than this...
-    let before_frame_content = before_frame
-        .iter()
-        .map(|(_, s)| *s)
-        .collect::<Vec<_>>()
-        .join("\n");
-    let after_frame_content = after_frame
-        .iter()
-        .map(|(_, s)| *s)
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let diff = TextDiff::configure()
-        .algorithm(similar::Algorithm::Patience)
-        .diff_lines(&before_frame_content, &after_frame_content);
-
-    // Transform text diffs of frames into to tree diffs,
-    // converting indices from our faux documents into those for the entire tree
-    for text_diff_op_group in diff.grouped_ops(0) {
-        for text_diff_op in text_diff_op_group {
-            match text_diff_op {
-                similar::DiffOp::Insert {
-                    new_index, new_len, ..
-                } => {
-                    for i in 0..new_len {
-                        tree_diff_ops.push(TreeDiffOp::Add {
-                            after_index: after_frame[new_index + i].0,
-                        });
-                    }
-                }
-                similar::DiffOp::Delete {
-                    old_index, old_len, ..
-                } => {
-                    for i in 0..old_len {
-                        tree_diff_ops.push(TreeDiffOp::Remove {
-                            before_index: before_frame[old_index + i].0,
-                        });
-                    }
-                }
-                similar::DiffOp::Replace {
-                    old_index,
-                    old_len,
-                    new_index,
-                    new_len,
-                } => {
-                    assert!(old_len == new_len);
-                    for i in 0..old_len {
-                        tree_diff_ops.push(TreeDiffOp::Replace {
-                            before_index: before_frame[old_index + i].0,
-                            after_index: after_frame[new_index + i].0,
-                        });
-                    }
-                }
-                similar::DiffOp::Equal { .. } => {}
-            }
-        }
-    }
-
-    tree_diff_ops
 }
 
 /// `None` is reserved for the root node.
@@ -217,6 +116,107 @@ impl IndexMut<&TreeNodeIndex> for Tree {
             None => &mut self.root,
         }
     }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+pub enum TreeDiffOp {
+    Add {
+        /// Index of added line in after content
+        after_index: usize,
+    },
+    Remove {
+        /// Index of removed line in before content
+        before_index: usize,
+    },
+    Replace {
+        /// Index of replaced line in before content
+        before_index: usize,
+        /// Index of replaced line in after content
+        after_index: usize,
+    },
+    // // JRS: Unclear if we'll actually support this...
+    // Reorder {
+    //     /// Index of reordered line in before content
+    //     before_index: usize,
+    //     /// Index of reordered line in after content
+    //     after_index: usize,
+    //     // JRS: Do we also want indices within their stack frame?
+    // },
+}
+
+#[derive(Debug)]
+pub struct TreeDiff<'content> {
+    before_lines: Vec<&'content str>,
+    after_lines: Vec<&'content str>,
+    ops: Vec<TreeDiffOp>,
+}
+
+fn compare_frames(
+    before_frame: Vec<(usize, &str)>,
+    after_frame: Vec<(usize, &str)>,
+) -> Vec<TreeDiffOp> {
+    let mut tree_diff_ops = Vec::new();
+
+    // Create faux documents for text diffing
+    // JRS: There's surely a better way to diff the frames than this...
+    let before_frame_content = before_frame
+        .iter()
+        .map(|(_, s)| *s)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let after_frame_content = after_frame
+        .iter()
+        .map(|(_, s)| *s)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let diff = TextDiff::configure()
+        .algorithm(similar::Algorithm::Patience)
+        .diff_lines(&before_frame_content, &after_frame_content);
+
+    // Transform text diffs of frames into to tree diffs,
+    // converting indices from our faux documents into those for the entire tree
+    for text_diff_op_group in diff.grouped_ops(0) {
+        for text_diff_op in text_diff_op_group {
+            match text_diff_op {
+                similar::DiffOp::Insert {
+                    new_index, new_len, ..
+                } => {
+                    for i in 0..new_len {
+                        tree_diff_ops.push(TreeDiffOp::Add {
+                            after_index: after_frame[new_index + i].0,
+                        });
+                    }
+                }
+                similar::DiffOp::Delete {
+                    old_index, old_len, ..
+                } => {
+                    for i in 0..old_len {
+                        tree_diff_ops.push(TreeDiffOp::Remove {
+                            before_index: before_frame[old_index + i].0,
+                        });
+                    }
+                }
+                similar::DiffOp::Replace {
+                    old_index,
+                    old_len,
+                    new_index,
+                    new_len,
+                } => {
+                    assert!(old_len == new_len);
+                    for i in 0..old_len {
+                        tree_diff_ops.push(TreeDiffOp::Replace {
+                            before_index: before_frame[old_index + i].0,
+                            after_index: after_frame[new_index + i].0,
+                        });
+                    }
+                }
+                similar::DiffOp::Equal { .. } => {}
+            }
+        }
+    }
+
+    tree_diff_ops
 }
 
 pub fn diff_tree<'content>(
