@@ -86,6 +86,10 @@ impl Tree {
         None
     }
 
+    fn root(&self) -> &TreeNode {
+        &self[&Tree::root_index()]
+    }
+
     fn register(&mut self, node: TreeNode) -> TreeNodeIndex {
         let index = node.index;
         self.nodes.push(node);
@@ -125,6 +129,13 @@ impl Tree {
 
         tree
     }
+
+    fn leaves(&self) -> TreeLeaves {
+        TreeLeaves {
+            tree: &self,
+            stack: vec![self.root()],
+        }
+    }
 }
 
 impl Index<&TreeNodeIndex> for Tree {
@@ -144,6 +155,38 @@ impl IndexMut<&TreeNodeIndex> for Tree {
             Some(i) => &mut self.nodes[i],
             None => &mut self.root,
         }
+    }
+}
+
+struct TreeLeaves<'tree> {
+    tree: &'tree Tree,
+    stack: Vec<&'tree TreeNode>,
+}
+
+impl<'tree> Iterator for TreeLeaves<'tree> {
+    type Item = &'tree TreeNode;
+
+    /// Advance to the next leaf node
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.stack.is_empty() {
+            return None;
+        }
+
+        while !self.stack.is_empty() {
+            // Pop from the end of the stack
+            let node = self.stack.pop().unwrap();
+            if node.children.is_empty() {
+                // If `node` is a leaf, we can stop here for now.
+                return Some(node);
+            } else {
+                // If `node` is internal, push all children (in reverse for expected ordering).
+                for i in (0..node.children.len()).rev() {
+                    self.stack.push(node.child(&self.tree, i).unwrap());
+                }
+            }
+        }
+
+        return None;
     }
 }
 
@@ -396,6 +439,25 @@ mod tests {
         assert_eq!(node_1_0.data(&items).trim(), "1.0");
         let node_1_0_parent = node_1_0.parent(&tree).unwrap();
         assert_eq!(node_1_0_parent, node_1);
+    }
+
+    #[test]
+    fn tree_leaves() {
+        let items: Vec<_> = "
+0
+  0.0
+    0.0.0
+  0.1
+  0.2
+1
+  1.0
+    1.0.0"
+            .trim()
+            .lines()
+            .collect();
+        let tree = Tree::from_indented_items(&items);
+        let leaves: Vec<&str> = tree.leaves().map(|node| node.data(&items).trim()).collect();
+        assert_eq!(leaves, vec!["0.0.0", "0.1", "0.2", "1.0.0"]);
     }
 
     #[test]
