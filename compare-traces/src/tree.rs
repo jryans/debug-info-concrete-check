@@ -39,20 +39,23 @@ impl TreeNode {
         }
     }
 
-    fn parent<'tree>(&self, tree: &'tree Tree) -> &'tree TreeNode {
-        &tree[&self.parent]
+    fn parent<'tree>(&self, tree: &'tree Tree) -> Option<&'tree TreeNode> {
+        match &self.index {
+            Some(_) => Some(&tree[&self.parent]),
+            None => None,
+        }
     }
 
-    fn child<'tree>(&self, tree: &'tree Tree, nth: usize) -> &'tree TreeNode {
-        &tree[&self.children[nth]]
+    fn child<'tree>(&self, tree: &'tree Tree, nth: usize) -> Option<&'tree TreeNode> {
+        self.children.get(nth).map(|index| &tree[index])
     }
 
-    fn first_child<'tree>(&self, tree: &'tree Tree) -> &'tree TreeNode {
-        &tree[self.children.first().unwrap()]
+    fn first_child<'tree>(&self, tree: &'tree Tree) -> Option<&'tree TreeNode> {
+        self.children.first().map(|index| &tree[index])
     }
 
-    fn last_child<'tree>(&self, tree: &'tree Tree) -> &'tree TreeNode {
-        &tree[self.children.last().unwrap()]
+    fn last_child<'tree>(&self, tree: &'tree Tree) -> Option<&'tree TreeNode> {
+        self.children.last().map(|index| &tree[index])
     }
 
     fn data<'container, T>(&self, container: &'container [T]) -> &'container T {
@@ -107,7 +110,7 @@ impl Tree {
                 assert!(item_depth == stack_depth + 1);
                 let stack_top = &tree[stack.last().unwrap()];
                 assert!(stack_top.children.len() > 0);
-                stack.push(stack_top.last_child(&tree).index);
+                stack.push(stack_top.last_child(&tree).unwrap().index);
             } else if item_depth < stack_depth {
                 assert!(item_depth == stack_depth - 1);
                 stack.pop();
@@ -384,14 +387,14 @@ mod tests {
             .collect();
         let tree = Tree::from_indented_items(&items);
         let root = &tree.root;
-        let node_0 = root.child(&tree, 0);
+        let node_0 = root.child(&tree, 0).unwrap();
         assert_eq!(node_0.data(&items).trim(), "0");
-        let node_0_1 = node_0.child(&tree, 1);
+        let node_0_1 = node_0.child(&tree, 1).unwrap();
         assert_eq!(node_0_1.data(&items).trim(), "0.1");
-        let node_1 = root.child(&tree, 1);
-        let node_1_0 = node_1.child(&tree, 0);
+        let node_1 = root.child(&tree, 1).unwrap();
+        let node_1_0 = node_1.child(&tree, 0).unwrap();
         assert_eq!(node_1_0.data(&items).trim(), "1.0");
-        let node_1_0_parent = node_1_0.parent(&tree);
+        let node_1_0_parent = node_1_0.parent(&tree).unwrap();
         assert_eq!(node_1_0_parent, node_1);
     }
 
