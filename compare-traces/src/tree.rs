@@ -15,15 +15,18 @@ fn line_depth(line: &str) -> usize {
 /// This allows nodes indices to remain in sync with those for the separate data array.
 type TreeNodeIndex = Option<usize>;
 
+#[derive(PartialEq, Eq, Debug)]
 struct TreeNode {
     index: TreeNodeIndex,
+    parent: TreeNodeIndex,
     children: Vec<TreeNodeIndex>,
 }
 
 impl TreeNode {
-    fn new(index: usize) -> TreeNode {
+    fn new(index: usize, parent: TreeNodeIndex) -> TreeNode {
         TreeNode {
             index: Some(index),
+            parent,
             children: Vec::new(),
         }
     }
@@ -31,12 +34,21 @@ impl TreeNode {
     fn new_root() -> TreeNode {
         TreeNode {
             index: None,
+            parent: None,
             children: Vec::new(),
         }
     }
 
+    fn parent<'tree>(&self, tree: &'tree Tree) -> &'tree TreeNode {
+        &tree[&self.parent]
+    }
+
     fn child<'tree>(&self, tree: &'tree Tree, nth: usize) -> &'tree TreeNode {
         &tree[&self.children[nth]]
+    }
+
+    fn first_child<'tree>(&self, tree: &'tree Tree) -> &'tree TreeNode {
+        &tree[self.children.first().unwrap()]
     }
 
     fn last_child<'tree>(&self, tree: &'tree Tree) -> &'tree TreeNode {
@@ -100,7 +112,9 @@ impl Tree {
                 assert!(item_depth == stack_depth - 1);
                 stack.pop();
             }
-            let node = TreeNode::new(i);
+            // TODO: Move this into `push_child` on `TreeNode` somehow
+            let stack_top_index = tree[stack.last().unwrap()].index;
+            let node = TreeNode::new(i, stack_top_index);
             let node_index = tree.register(node);
             let stack_top = &mut tree[stack.last().unwrap()];
             stack_top.children.push(node_index);
@@ -377,6 +391,8 @@ mod tests {
         let node_1 = root.child(&tree, 1);
         let node_1_0 = node_1.child(&tree, 0);
         assert_eq!(node_1_0.data(&items).trim(), "1.0");
+        let node_1_0_parent = node_1_0.parent(&tree);
+        assert_eq!(node_1_0_parent, node_1);
     }
 
     #[test]
