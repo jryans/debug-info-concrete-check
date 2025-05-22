@@ -1,8 +1,9 @@
+use std::hash::Hash;
 use std::ops::{Index, IndexMut};
 
 use once_cell::sync::Lazy;
 use regex::Regex;
-use similar::TextDiff;
+use similar::{capture_diff_slices, DiffOp, TextDiff};
 
 /// Computes 1-based depth of a single line.
 /// Assumes 2 space indentation is used.
@@ -190,6 +191,42 @@ impl<'tree> Iterator for TreeLeaves<'tree> {
     }
 }
 
+fn tree_leaves_lcs<T>(
+    tree_a: &Tree,
+    tree_b: &Tree,
+    items_a: &[T],
+    items_b: &[T],
+) -> Vec<(TreeNodeIndex, TreeNodeIndex)>
+where
+    T: Eq + Hash + Ord,
+{
+    let leaves_a: Vec<&TreeNode> = tree_a.leaves().collect();
+    let leaves_a_items: Vec<&T> = leaves_a.iter().map(|node| node.data(&items_a)).collect();
+    let leaves_b: Vec<&TreeNode> = tree_b.leaves().collect();
+    let leaves_b_items: Vec<&T> = leaves_b.iter().map(|node| node.data(&items_b)).collect();
+    // TODO: Consider using `similar::IdentifyDistinct` for large inputs
+    let diff_ops = capture_diff_slices(similar::Algorithm::Myers, &leaves_a_items, &leaves_b_items);
+    let mut lcs = Vec::new();
+    for diff_op in diff_ops {
+        match diff_op {
+            DiffOp::Equal {
+                old_index,
+                new_index,
+                len,
+            } => {
+                // Translate leaf indices back up to tree indices
+                // JRS: Should keep these small summary representations,
+                // instead of inflating them to cover each item...?
+                for i in 0..len {
+                    lcs.push((leaves_a[old_index + i].index, leaves_b[new_index + i].index));
+                }
+            }
+            _ => continue,
+        }
+    }
+    lcs
+}
+
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 pub enum TreeDiffOp {
     Add {
@@ -251,7 +288,7 @@ fn compare_frames(
     for text_diff_op_group in diff.grouped_ops(0) {
         for text_diff_op in text_diff_op_group {
             match text_diff_op {
-                similar::DiffOp::Insert {
+                DiffOp::Insert {
                     new_index, new_len, ..
                 } => {
                     for i in 0..new_len {
@@ -260,7 +297,7 @@ fn compare_frames(
                         });
                     }
                 }
-                similar::DiffOp::Delete {
+                DiffOp::Delete {
                     old_index, old_len, ..
                 } => {
                     for i in 0..old_len {
@@ -269,7 +306,7 @@ fn compare_frames(
                         });
                     }
                 }
-                similar::DiffOp::Replace {
+                DiffOp::Replace {
                     old_index,
                     old_len,
                     new_index,
@@ -283,7 +320,7 @@ fn compare_frames(
                         });
                     }
                 }
-                similar::DiffOp::Equal { .. } => {}
+                DiffOp::Equal { .. } => {}
             }
         }
     }
@@ -458,6 +495,53 @@ mod tests {
         let tree = Tree::from_indented_items(&items);
         let leaves: Vec<&str> = tree.leaves().map(|node| node.data(&items).trim()).collect();
         assert_eq!(leaves, vec!["0.0.0", "0.1", "0.2", "1.0.0"]);
+    }
+
+    #[test]
+    fn tree_leaves_lcs_matching() {
+        let items_1: Vec<_> = "
+D
+  P
+    Sa
+    Sb
+    Sc
+  P
+    Sd
+    Se
+  P
+    Sf
+"
+        .trim()
+        .lines()
+        .collect();
+        let items_2: Vec<_> = "
+D
+  P
+    Sa
+    Sc
+  P
+    Sf
+  P
+    Sd
+    Se
+    Sg
+"
+        .trim()
+        .lines()
+        .collect();
+        let tree_1 = Tree::from_indented_items(&items_1);
+        let tree_2 = Tree::from_indented_items(&items_2);
+        let leaves_lcs = tree_leaves_lcs(&tree_1, &tree_2, &items_1, &items_2);
+        let items_1_lcs: Vec<&str> = leaves_lcs
+            .iter()
+            .map(|index_pair| tree_1[&index_pair.0].data(&items_1).trim())
+            .collect();
+        let items_2_lcs: Vec<&str> = leaves_lcs
+            .iter()
+            .map(|index_pair| tree_2[&index_pair.1].data(&items_2).trim())
+            .collect();
+        assert_eq!(items_1_lcs, items_2_lcs);
+        assert_eq!(items_1_lcs, vec!["Sa", "Sc", "Sd", "Se"]);
     }
 
     #[test]
