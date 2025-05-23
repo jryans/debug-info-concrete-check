@@ -1,6 +1,8 @@
+use std::collections::BTreeSet;
 use std::hash::Hash;
 use std::ops::{Index, IndexMut};
 
+use bimap::BiHashMap;
 use similar::{capture_diff_slices, DiffOp, TextDiff};
 
 use crate::event::{line_depth, Event};
@@ -530,6 +532,63 @@ impl Hash for FuzzyEvent {
     }
 }
 
+fn matching_bimap<T>(
+    before_tree: &Tree,
+    after_tree: &Tree,
+    before_items: &[T],
+    after_items: &[T],
+) -> BiHashMap<TreeNodeIndex, TreeNodeIndex>
+where
+    // `Hash` and `Ord` do not appear to actually be used by the diff algorithm
+    T: Eq + Hash + Ord,
+{
+    let mut matching = BiHashMap::new();
+
+    // Find the LCS of the leaves and add this to the matching bimap.
+    // JRS: Algorithm says to do this for _each_ leaf label...
+    // Our meaning of label might be the list of parent functions...?
+    let leaves_lcs = tree_leaves_lcs(before_tree, after_tree, before_items, after_items);
+    matching.extend(leaves_lcs.matched.into_iter());
+
+    // Match any remaining leaves to their first trace-order match
+    let before_leaves_unmatched: Vec<TreeNodeIndex> = leaves_lcs
+        .unmatched
+        .iter()
+        .map(|index_pair| index_pair.0)
+        .filter(|index| index.is_some())
+        .collect();
+    // Use `BTreeSet` with the after side for efficient removal when a match is found
+    let mut after_leaves_unmatched: BTreeSet<TreeNodeIndex> = leaves_lcs
+        .unmatched
+        .iter()
+        .map(|index_pair| index_pair.1)
+        .filter(|index| index.is_some())
+        .collect();
+    for before_leaf_index in &before_leaves_unmatched {
+        let mut to_remove: Option<TreeNodeIndex> = None;
+        for after_leaf_index in &after_leaves_unmatched {
+            let before_leaf_item = before_tree[before_leaf_index].data(&before_items);
+            let after_leaf_item = after_tree[after_leaf_index].data(&after_items);
+            if before_leaf_item == after_leaf_item {
+                matching.insert(*before_leaf_index, *after_leaf_index);
+                to_remove = Some(*after_leaf_index);
+                break;
+            }
+        }
+        if let Some(index) = to_remove {
+            after_leaves_unmatched.remove(&index);
+        }
+    }
+
+    // TODO: Add the branch nodes
+
+    // JRS: Hmm, even fast match seems to want to pairwise match the branch nodes, right...?
+    // Perhaps go through what remains in trace order and accept the first match found among
+    // unmatched...? Ensure function names of all parents match.
+
+    matching
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -673,6 +732,54 @@ CF: system_path at exec-cmd.c:265:6
         let tree_2 = Tree::from_indented_items(&items_2);
         let leaves_lcs = tree_leaves_lcs(&tree_1, &tree_2, &events_1, &events_2);
         assert_eq!(leaves_lcs.matched, vec![(Some(1), Some(1))]);
+    }
+
+    #[test]
+    fn tree_leaves_matching_bimap() {
+        let items_1: Vec<_> = "
+D
+  P
+    Sa
+    Sb
+    Sc
+  P
+    Sd
+    Se
+  P
+    Sf"
+        .trim()
+        .lines()
+        .collect();
+        let items_2: Vec<_> = "
+D
+  P
+    Sa
+    Sc
+  P
+    Sf
+  P
+    Sd
+    Se
+    Sg"
+        .trim()
+        .lines()
+        .collect();
+        let tree_1 = Tree::from_indented_items(&items_1);
+        let tree_2 = Tree::from_indented_items(&items_2);
+        let matching_bimap = matching_bimap(&tree_1, &tree_2, &items_1, &items_2);
+        assert_eq!(matching_bimap.len(), 5);
+        let mut items_1_matched: Vec<&str> = matching_bimap
+            .left_values()
+            .map(|index| tree_1[&index].data(&items_1).trim())
+            .collect();
+        items_1_matched.sort();
+        let mut items_2_matched: Vec<&str> = matching_bimap
+            .right_values()
+            .map(|index| tree_2[&index].data(&items_2).trim())
+            .collect();
+        items_2_matched.sort();
+        assert_eq!(items_1_matched, items_2_matched);
+        assert_eq!(items_1_matched, vec!["Sa", "Sc", "Sd", "Se", "Sf"]);
     }
 
     #[test]
