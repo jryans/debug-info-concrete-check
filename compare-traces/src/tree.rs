@@ -184,12 +184,12 @@ impl<'tree> Iterator for TreeLeaves<'tree> {
     }
 }
 
-fn tree_leaves_lcs<T>(
-    tree_a: &Tree,
-    tree_b: &Tree,
-    items_a: &[T],
-    items_b: &[T],
-) -> Vec<(TreeNodeIndex, TreeNodeIndex)>
+struct TreeLcs {
+    matched: Vec<(TreeNodeIndex, TreeNodeIndex)>,
+    unmatched: Vec<(TreeNodeIndex, TreeNodeIndex)>,
+}
+
+fn tree_leaves_lcs<T>(tree_a: &Tree, tree_b: &Tree, items_a: &[T], items_b: &[T]) -> TreeLcs
 where
     // `Hash` and `Ord` do not appear to actually be used by the diff algorithm
     T: Eq + Hash + Ord,
@@ -200,25 +200,56 @@ where
     let leaves_b_items: Vec<&T> = leaves_b.iter().map(|node| node.data(&items_b)).collect();
     // TODO: Consider using `similar::IdentifyDistinct` for large inputs
     let diff_ops = capture_diff_slices(similar::Algorithm::Myers, &leaves_a_items, &leaves_b_items);
-    let mut lcs = Vec::new();
+    let mut matched = Vec::new();
+    let mut unmatched = Vec::new();
     for diff_op in diff_ops {
+        // Translate leaf indices back up to tree indices
+        // JRS: Should keep these small summary representations,
+        // instead of inflating them to cover each item...?
         match diff_op {
             DiffOp::Equal {
                 old_index,
                 new_index,
                 len,
             } => {
-                // Translate leaf indices back up to tree indices
-                // JRS: Should keep these small summary representations,
-                // instead of inflating them to cover each item...?
                 for i in 0..len {
-                    lcs.push((leaves_a[old_index + i].index, leaves_b[new_index + i].index));
+                    matched.push((leaves_a[old_index + i].index, leaves_b[new_index + i].index));
                 }
             }
-            _ => continue,
+            DiffOp::Delete {
+                old_index,
+                old_len,
+                new_index: _,
+            } => {
+                for i in 0..old_len {
+                    unmatched.push((leaves_a[old_index + i].index, None));
+                }
+            }
+            DiffOp::Insert {
+                old_index: _,
+                new_index,
+                new_len,
+            } => {
+                for i in 0..new_len {
+                    unmatched.push((None, leaves_b[new_index + i].index));
+                }
+            }
+            DiffOp::Replace {
+                old_index,
+                old_len,
+                new_index,
+                new_len,
+            } => {
+                for i in 0..old_len {
+                    unmatched.push((leaves_a[old_index + i].index, None));
+                }
+                for i in 0..new_len {
+                    unmatched.push((None, leaves_b[new_index + i].index));
+                }
+            }
         }
     }
-    lcs
+    TreeLcs { matched, unmatched }
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
@@ -579,16 +610,34 @@ D
         let tree_1 = Tree::from_indented_items(&items_1);
         let tree_2 = Tree::from_indented_items(&items_2);
         let leaves_lcs = tree_leaves_lcs(&tree_1, &tree_2, &items_1, &items_2);
-        let items_1_lcs: Vec<&str> = leaves_lcs
+        let items_1_lcs_matched: Vec<&str> = leaves_lcs
+            .matched
             .iter()
             .map(|index_pair| tree_1[&index_pair.0].data(&items_1).trim())
             .collect();
-        let items_2_lcs: Vec<&str> = leaves_lcs
+        let items_2_lcs_matched: Vec<&str> = leaves_lcs
+            .matched
             .iter()
             .map(|index_pair| tree_2[&index_pair.1].data(&items_2).trim())
             .collect();
-        assert_eq!(items_1_lcs, items_2_lcs);
-        assert_eq!(items_1_lcs, vec!["Sa", "Sc", "Sd", "Se"]);
+        assert_eq!(items_1_lcs_matched, items_2_lcs_matched);
+        assert_eq!(items_1_lcs_matched, vec!["Sa", "Sc", "Sd", "Se"]);
+        let items_1_lcs_unmatched: Vec<&str> = leaves_lcs
+            .unmatched
+            .iter()
+            .map(|index_pair| index_pair.0)
+            .filter(|index| index.is_some())
+            .map(|index| tree_1[&index].data(&items_1).trim())
+            .collect();
+        let items_2_lcs_unmatched: Vec<&str> = leaves_lcs
+            .unmatched
+            .iter()
+            .map(|index_pair| index_pair.1)
+            .filter(|index| index.is_some())
+            .map(|index| tree_2[&index].data(&items_2).trim())
+            .collect();
+        assert_eq!(items_1_lcs_unmatched, vec!["Sb", "Sf"]);
+        assert_eq!(items_2_lcs_unmatched, vec!["Sf", "Sg"]);
     }
 
     #[test]
@@ -620,7 +669,7 @@ CF: system_path at exec-cmd.c:265:6
         let tree_1 = Tree::from_indented_items(&items_1);
         let tree_2 = Tree::from_indented_items(&items_2);
         let leaves_lcs = tree_leaves_lcs(&tree_1, &tree_2, &events_1, &events_2);
-        assert_eq!(leaves_lcs, vec![(Some(1), Some(1))]);
+        assert_eq!(leaves_lcs.matched, vec![(Some(1), Some(1))]);
     }
 
     #[test]
