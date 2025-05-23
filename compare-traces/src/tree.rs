@@ -7,6 +7,9 @@ use crate::event::{line_depth, Event};
 
 /// `None` is reserved for the root node.
 /// This allows nodes indices to remain in sync with those for the separate data array.
+/// JRS: This should be a proper wrapper type...
+/// A few places are using `None` to mean no value,
+/// which may cause confusion.
 type TreeNodeIndex = Option<usize>;
 
 #[derive(PartialEq, Eq, Debug)]
