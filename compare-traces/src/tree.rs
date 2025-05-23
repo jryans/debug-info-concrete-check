@@ -502,8 +502,7 @@ D
     Sd
     Se
   P
-    Sf
-"
+    Sf"
         .trim()
         .lines()
         .collect();
@@ -517,8 +516,7 @@ D
   P
     Sd
     Se
-    Sg
-"
+    Sg"
         .trim()
         .lines()
         .collect();
