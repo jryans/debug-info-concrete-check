@@ -9,7 +9,7 @@ use anyhow::{Context, Ok, Result};
 use serde::Deserialize;
 use serde_yaml::Value;
 
-use crate::report::Location;
+use crate::event::Location;
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 pub enum RemarkType {

@@ -6,10 +6,14 @@ use anyhow::{anyhow, Context, Ok, Result};
 use clap::{Parser, ValueEnum};
 use similar::TextDiff;
 
-use crate::print::print_diff;
-use crate::remarks::{load_remarks, Remark};
-use crate::report::{analyse_and_print_report, print_before_events_by_type, Location};
+use crate::{
+    event::Location,
+    print::print_diff,
+    remarks::{load_remarks, Remark},
+    report::{analyse_and_print_report, print_before_events_by_type},
+};
 
+mod event;
 mod print;
 mod remarks;
 mod report;
