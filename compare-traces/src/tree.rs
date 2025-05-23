@@ -3,7 +3,7 @@ use std::ops::{Index, IndexMut};
 
 use similar::{capture_diff_slices, DiffOp, TextDiff};
 
-use crate::event::line_depth;
+use crate::event::{line_depth, Event};
 
 /// `None` is reserved for the root node.
 /// This allows nodes indices to remain in sync with those for the separate data array.
@@ -191,6 +191,7 @@ fn tree_leaves_lcs<T>(
     items_b: &[T],
 ) -> Vec<(TreeNodeIndex, TreeNodeIndex)>
 where
+    // `Hash` and `Ord` do not appear to actually be used by the diff algorithm
     T: Eq + Hash + Ord,
 {
     let leaves_a: Vec<&TreeNode> = tree_a.leaves().collect();
@@ -440,6 +441,61 @@ pub fn diff_tree<'content>(
     }
 }
 
+/// Override `Event` equality to allow for some source coordinate drift
+struct FuzzyEvent(Event);
+
+impl PartialEq for FuzzyEvent {
+    fn eq(&self, other: &Self) -> bool {
+        if self.0 == other.0 {
+            return true;
+        }
+
+        if self.0.depth != other.0.depth || self.0.event_type != other.0.event_type {
+            return false;
+        }
+
+        let self_loc = &self.0.location;
+        let other_loc = &other.0.location;
+        if self_loc.function != other_loc.function || self_loc.file != other_loc.file {
+            return false;
+        }
+
+        if self_loc.line.is_some() != other_loc.line.is_some() {
+            return false;
+        }
+        let self_line = self_loc.line.unwrap();
+        let other_line = other_loc.line.unwrap();
+        if self_line.abs_diff(other_line) > 3 {
+            return false;
+        }
+
+        true
+    }
+}
+
+impl Eq for FuzzyEvent {}
+
+// JRS: May need to adjust `Ord` and `Hash` to match `Eq`...
+// So far, they appear to not be used by the diff algorithms we're applying.
+
+impl PartialOrd for FuzzyEvent {
+    fn partial_cmp(&self, _other: &Self) -> Option<std::cmp::Ordering> {
+        todo!()
+    }
+}
+
+impl Ord for FuzzyEvent {
+    fn cmp(&self, _other: &Self) -> std::cmp::Ordering {
+        todo!()
+    }
+}
+
+impl Hash for FuzzyEvent {
+    fn hash<H: std::hash::Hasher>(&self, _state: &mut H) {
+        todo!()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -533,6 +589,38 @@ D
             .collect();
         assert_eq!(items_1_lcs, items_2_lcs);
         assert_eq!(items_1_lcs, vec!["Sa", "Sc", "Sd", "Se"]);
+    }
+
+    #[test]
+    fn tree_leaves_lcs_fuzzy_matching() {
+        let items_1: Vec<_> = "
+CF: system_path at exec-cmd.c:265:6
+  CT: is_absolute_path at cache.h:1275:0
+  RF: is_absolute_path at cache.h:1276:9"
+            .trim()
+            .lines()
+            .collect();
+        // Leaf 1 differs by 1 line
+        // Leaf 2 differs by many lines
+        let items_2: Vec<_> = "
+CF: system_path at exec-cmd.c:265:6
+  CT: is_absolute_path at cache.h:1274:0
+  RF: is_absolute_path at cache.h:1290:9"
+            .trim()
+            .lines()
+            .collect();
+        let events_1: Vec<_> = items_1
+            .iter()
+            .map(|line| FuzzyEvent(Event::parse(line).unwrap()))
+            .collect();
+        let events_2: Vec<_> = items_2
+            .iter()
+            .map(|line| FuzzyEvent(Event::parse(line).unwrap()))
+            .collect();
+        let tree_1 = Tree::from_indented_items(&items_1);
+        let tree_2 = Tree::from_indented_items(&items_2);
+        let leaves_lcs = tree_leaves_lcs(&tree_1, &tree_2, &events_1, &events_2);
+        assert_eq!(leaves_lcs, vec![(Some(1), Some(1))]);
     }
 
     #[test]
