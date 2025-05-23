@@ -173,7 +173,7 @@ impl<'tree> Iterator for TreeLeaves<'tree> {
                 // If `node` is a leaf, we can stop here for now.
                 return Some(node);
             } else {
-                // If `node` is internal, push all children (in reverse for expected ordering).
+                // If `node` is a branch, push all children (in reverse for expected ordering).
                 for i in (0..node.children.len()).rev() {
                     self.stack.push(node.child(&self.tree, i).unwrap());
                 }
