@@ -4,6 +4,13 @@ use anyhow::{anyhow, Ok, Result};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
+/// Computes 1-based depth of a single line.
+/// Assumes 2 space indentation is used.
+pub fn line_depth(line: &str) -> usize {
+    static INDENT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^ *").unwrap());
+    INDENT_RE.captures(line).map_or(0, |c| c[0].len() / 2) + 1
+}
+
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 pub enum EventType {
     CallFrom,
@@ -35,6 +42,7 @@ pub struct Location {
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
 pub struct Event {
+    pub depth: usize,
     pub event_type: EventType,
     // TODO: Maybe store reference instead...?
     pub detail: String,
@@ -45,6 +53,9 @@ impl Event {
     // See `printEventFromLineInfo` in `collect-trace.cpp` for output path
     pub fn parse(event_str: &str) -> Result<Self> {
         let mut rest = event_str;
+
+        // Capture 1-based depth from indentation
+        let depth = line_depth(rest);
 
         // Remove any leading indentation
         rest = rest.trim_start();
@@ -97,6 +108,7 @@ impl Event {
         }
 
         Ok(Self {
+            depth,
             event_type,
             detail,
             location: Location {

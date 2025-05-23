@@ -1,16 +1,9 @@
 use std::hash::Hash;
 use std::ops::{Index, IndexMut};
 
-use once_cell::sync::Lazy;
-use regex::Regex;
 use similar::{capture_diff_slices, DiffOp, TextDiff};
 
-/// Computes 1-based depth of a single line.
-/// Assumes 2 space indentation is used.
-fn line_depth(line: &str) -> usize {
-    static INDENT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^ *").unwrap());
-    INDENT_RE.captures(line).map_or(0, |c| c[0].len() / 2) + 1
-}
+use crate::event::line_depth;
 
 /// `None` is reserved for the root node.
 /// This allows nodes indices to remain in sync with those for the separate data array.
