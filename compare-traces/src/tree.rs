@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::hash::Hash;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::{Index, IndexMut};
 
 use bimap::BiHashMap;
@@ -533,6 +533,29 @@ impl Hash for FuzzyEvent {
     }
 }
 
+/// Label each event by hashing all function names along its path in the tree.
+fn tree_event_labels(tree: &Tree, events: &[&Event]) -> Vec<u64> {
+    let mut hashers: Vec<DefaultHasher> = Vec::with_capacity(events.len());
+
+    // For each event, look for parent's previously computed hasher,
+    // and then add that event's own function name.
+    for i in 0..events.len() {
+        let event = events[i];
+        let node = &tree[&TreeNodeIndex::Node(i)];
+        let parent_index = node.parent(tree).unwrap().index;
+        let parent_hasher = match parent_index {
+            TreeNodeIndex::Node(p) => Some(&hashers[p]),
+            TreeNodeIndex::Root => None,
+        };
+        let mut hasher: DefaultHasher =
+            parent_hasher.map_or(DefaultHasher::new(), |hasher| hasher.clone());
+        event.location.function.hash(&mut hasher);
+        hashers.push(hasher);
+    }
+
+    hashers.into_iter().map(|hasher| hasher.finish()).collect()
+}
+
 fn matching_bimap<T>(
     before_tree: &Tree,
     after_tree: &Tree,
@@ -769,6 +792,28 @@ CF: system_path at exec-cmd.c:265:6
             leaves_lcs.matched,
             vec![(TreeNodeIndex::Node(1), TreeNodeIndex::Node(1))]
         );
+    }
+
+    #[test]
+    fn tree_events_with_labels() {
+        let items: Vec<_> = "
+CF: system_path at exec-cmd.c:265:6
+  CT: is_absolute_path at cache.h:1275:0
+  CF: is_absolute_path at cache.h:1276:9
+    CT: git_is_dir_sep at git-compat-util.h:447:0
+    RF: git_is_dir_sep at git-compat-util.h:448:2"
+            .trim()
+            .lines()
+            .collect();
+        let fuzzy_events: Vec<_> = items
+            .iter()
+            .map(|line| FuzzyEvent(Event::parse(line).unwrap()))
+            .collect();
+        let events: Vec<&Event> = fuzzy_events.iter().map(|fuzzy| &fuzzy.0).collect();
+        let tree = Tree::from_indented_items(&items);
+        let labels = tree_event_labels(&tree, &events);
+        assert_eq!(labels[1], labels[2]);
+        assert_eq!(labels[3], labels[4]);
     }
 
     #[test]
