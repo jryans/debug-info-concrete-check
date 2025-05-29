@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::{Index, IndexMut};
 
@@ -195,21 +195,32 @@ struct TreeLcs {
     unmatched: Vec<(Option<TreeNodeIndex>, Option<TreeNodeIndex>)>,
 }
 
-fn tree_leaves_lcs<T>(tree_a: &Tree, tree_b: &Tree, items_a: &[T], items_b: &[T]) -> TreeLcs
+fn tree_subset_lcs<T>(
+    tree_a: &Tree,
+    tree_b: &Tree,
+    items_a: &[T],
+    items_b: &[T],
+    subset_a: &[TreeNodeIndex],
+    subset_b: &[TreeNodeIndex],
+) -> TreeLcs
 where
     // `Hash` and `Ord` do not appear to actually be used by the diff algorithm
     T: Eq + Hash + Ord,
 {
-    let leaves_a: Vec<&TreeNode> = tree_a.leaves().collect();
-    let leaves_a_items: Vec<&T> = leaves_a.iter().map(|node| node.data(&items_a)).collect();
-    let leaves_b: Vec<&TreeNode> = tree_b.leaves().collect();
-    let leaves_b_items: Vec<&T> = leaves_b.iter().map(|node| node.data(&items_b)).collect();
+    let subset_a_items: Vec<&T> = subset_a
+        .iter()
+        .map(|index| tree_a[index].data(&items_a))
+        .collect();
+    let subset_b_items: Vec<&T> = subset_b
+        .iter()
+        .map(|index| tree_b[index].data(&items_b))
+        .collect();
     // TODO: Consider using `similar::IdentifyDistinct` for large inputs
-    let diff_ops = capture_diff_slices(similar::Algorithm::Myers, &leaves_a_items, &leaves_b_items);
+    let diff_ops = capture_diff_slices(similar::Algorithm::Myers, &subset_a_items, &subset_b_items);
     let mut matched = Vec::new();
     let mut unmatched = Vec::new();
     for diff_op in diff_ops {
-        // Translate leaf indices back up to tree indices
+        // Translate subset indices back up to tree indices
         // JRS: Should keep these small summary representations,
         // instead of inflating them to cover each item...?
         match diff_op {
@@ -219,7 +230,7 @@ where
                 len,
             } => {
                 for i in 0..len {
-                    matched.push((leaves_a[old_index + i].index, leaves_b[new_index + i].index));
+                    matched.push((subset_a[old_index + i], subset_b[new_index + i]));
                 }
             }
             DiffOp::Delete {
@@ -228,7 +239,7 @@ where
                 new_index: _,
             } => {
                 for i in 0..old_len {
-                    unmatched.push((Some(leaves_a[old_index + i].index), None));
+                    unmatched.push((Some(subset_a[old_index + i]), None));
                 }
             }
             DiffOp::Insert {
@@ -237,7 +248,7 @@ where
                 new_len,
             } => {
                 for i in 0..new_len {
-                    unmatched.push((None, Some(leaves_b[new_index + i].index)));
+                    unmatched.push((None, Some(subset_b[new_index + i])));
                 }
             }
             DiffOp::Replace {
@@ -247,10 +258,10 @@ where
                 new_len,
             } => {
                 for i in 0..old_len {
-                    unmatched.push((Some(leaves_a[old_index + i].index), None));
+                    unmatched.push((Some(subset_a[old_index + i]), None));
                 }
                 for i in 0..new_len {
-                    unmatched.push((None, Some(leaves_b[new_index + i].index)));
+                    unmatched.push((None, Some(subset_b[new_index + i])));
                 }
             }
         }
@@ -562,6 +573,8 @@ fn matching_bimap<T>(
     after_tree: &Tree,
     before_items: &[T],
     after_items: &[T],
+    before_labels: &[u64],
+    after_labels: &[u64],
 ) -> BiHashMap<TreeNodeIndex, TreeNodeIndex>
 where
     // `Hash` and `Ord` do not appear to actually be used by the diff algorithm
@@ -569,41 +582,71 @@ where
 {
     let mut matching = BiHashMap::new();
 
-    // Find the LCS of the leaves and add this to the matching bimap.
-    // JRS: Algorithm says to do this for _each_ leaf label...
-    // Our meaning of label might be the list of parent functions...?
-    let leaves_lcs = tree_leaves_lcs(before_tree, after_tree, before_items, after_items);
-    matching.extend(leaves_lcs.matched.into_iter());
+    // Group leaves by label
+    let mut before_leaves_by_label: HashMap<u64, Vec<TreeNodeIndex>> = HashMap::new();
+    for leaf in before_tree.leaves() {
+        let label = leaf.data(before_labels);
+        before_leaves_by_label
+            .entry(*label)
+            .or_default()
+            .push(leaf.index);
+    }
+    let mut after_leaves_by_label: HashMap<u64, Vec<TreeNodeIndex>> = HashMap::new();
+    for leaf in after_tree.leaves() {
+        let label = leaf.data(after_labels);
+        after_leaves_by_label
+            .entry(*label)
+            .or_default()
+            .push(leaf.index);
+    }
 
-    // Match any remaining leaves to their first trace-order match
-    let before_leaves_unmatched: Vec<TreeNodeIndex> = leaves_lcs
-        .unmatched
-        .iter()
-        .map(|index_pair| index_pair.0)
-        .filter(|index| index.is_some())
-        .map(|index| index.unwrap())
-        .collect();
-    // Use `BTreeSet` with the after side for efficient removal when a match is found
-    let mut after_leaves_unmatched: BTreeSet<TreeNodeIndex> = leaves_lcs
-        .unmatched
-        .iter()
-        .map(|index_pair| index_pair.1)
-        .filter(|index| index.is_some())
-        .map(|index| index.unwrap())
-        .collect();
-    for before_leaf_index in &before_leaves_unmatched {
-        let mut to_remove: Option<TreeNodeIndex> = None;
-        for after_leaf_index in &after_leaves_unmatched {
-            let before_leaf_item = before_tree[before_leaf_index].data(&before_items);
-            let after_leaf_item = after_tree[after_leaf_index].data(&after_items);
-            if before_leaf_item == after_leaf_item {
-                matching.insert(*before_leaf_index, *after_leaf_index);
-                to_remove = Some(*after_leaf_index);
-                break;
+    // For each leaf label, find the LCS of the leaves and add this to the matching bimap
+    let default_vec: Vec<TreeNodeIndex> = Vec::new();
+    for leaf_label in before_leaves_by_label.keys() {
+        let before_leaves = &before_leaves_by_label[leaf_label];
+        let after_leaves = after_leaves_by_label
+            .get(leaf_label)
+            .unwrap_or(&default_vec);
+        let leaves_lcs = tree_subset_lcs(
+            before_tree,
+            after_tree,
+            before_items,
+            after_items,
+            before_leaves,
+            after_leaves,
+        );
+        matching.extend(leaves_lcs.matched.into_iter());
+
+        // Match any remaining leaves to their first trace-order match
+        let before_leaves_unmatched: Vec<TreeNodeIndex> = leaves_lcs
+            .unmatched
+            .iter()
+            .map(|index_pair| index_pair.0)
+            .filter(|index| index.is_some())
+            .map(|index| index.unwrap())
+            .collect();
+        // Use `BTreeSet` with the after side for efficient removal when a match is found
+        let mut after_leaves_unmatched: BTreeSet<TreeNodeIndex> = leaves_lcs
+            .unmatched
+            .iter()
+            .map(|index_pair| index_pair.1)
+            .filter(|index| index.is_some())
+            .map(|index| index.unwrap())
+            .collect();
+        for before_leaf_index in &before_leaves_unmatched {
+            let mut to_remove: Option<TreeNodeIndex> = None;
+            for after_leaf_index in &after_leaves_unmatched {
+                let before_leaf_item = before_tree[before_leaf_index].data(&before_items);
+                let after_leaf_item = after_tree[after_leaf_index].data(&after_items);
+                if before_leaf_item == after_leaf_item {
+                    matching.insert(*before_leaf_index, *after_leaf_index);
+                    to_remove = Some(*after_leaf_index);
+                    break;
+                }
             }
-        }
-        if let Some(index) = to_remove {
-            after_leaves_unmatched.remove(&index);
+            if let Some(index) = to_remove {
+                after_leaves_unmatched.remove(&index);
+            }
         }
     }
 
@@ -632,6 +675,9 @@ pub fn diff_tree_chawathe<'content>(
         .iter()
         .map(|line| FuzzyEvent(Event::parse(line).unwrap()))
         .collect();
+    // TODO: To be removed with `Eventable` trait
+    let before_unfuzzy_events: Vec<&Event> = before_events.iter().map(|fuzzy| &fuzzy.0).collect();
+    let after_unfuzzy_events: Vec<&Event> = after_events.iter().map(|fuzzy| &fuzzy.0).collect();
 
     // let mut ops = Vec::new();
 
@@ -639,8 +685,19 @@ pub fn diff_tree_chawathe<'content>(
     let before_tree = Tree::from_indented_items(&before_lines);
     let after_tree = Tree::from_indented_items(&after_lines);
 
+    // Collect tree event labels from function names along each node's tree path
+    let before_labels = tree_event_labels(&before_tree, &before_unfuzzy_events);
+    let after_labels = tree_event_labels(&after_tree, &after_unfuzzy_events);
+
     // Build initial matching bimap
-    let matching = matching_bimap(&before_tree, &after_tree, &before_events, &after_events);
+    let matching = matching_bimap(
+        &before_tree,
+        &after_tree,
+        &before_events,
+        &after_events,
+        &before_labels,
+        &after_labels,
+    );
 
     todo!()
 }
@@ -727,7 +784,10 @@ D
         .collect();
         let tree_1 = Tree::from_indented_items(&items_1);
         let tree_2 = Tree::from_indented_items(&items_2);
-        let leaves_lcs = tree_leaves_lcs(&tree_1, &tree_2, &items_1, &items_2);
+        let leaves_1: Vec<TreeNodeIndex> = tree_1.leaves().map(|node| node.index).collect();
+        let leaves_2: Vec<TreeNodeIndex> = tree_2.leaves().map(|node| node.index).collect();
+        let leaves_lcs =
+            tree_subset_lcs(&tree_1, &tree_2, &items_1, &items_2, &leaves_1, &leaves_2);
         let items_1_lcs_matched: Vec<&str> = leaves_lcs
             .matched
             .iter()
@@ -788,7 +848,10 @@ CF: system_path at exec-cmd.c:265:6
             .collect();
         let tree_1 = Tree::from_indented_items(&items_1);
         let tree_2 = Tree::from_indented_items(&items_2);
-        let leaves_lcs = tree_leaves_lcs(&tree_1, &tree_2, &events_1, &events_2);
+        let leaves_1: Vec<TreeNodeIndex> = tree_1.leaves().map(|node| node.index).collect();
+        let leaves_2: Vec<TreeNodeIndex> = tree_2.leaves().map(|node| node.index).collect();
+        let leaves_lcs =
+            tree_subset_lcs(&tree_1, &tree_2, &events_1, &events_2, &leaves_1, &leaves_2);
         assert_eq!(
             leaves_lcs.matched,
             vec![(TreeNodeIndex::Node(1), TreeNodeIndex::Node(1))]
@@ -810,6 +873,7 @@ CF: system_path at exec-cmd.c:265:6
             .iter()
             .map(|line| FuzzyEvent(Event::parse(line).unwrap()))
             .collect();
+        // TODO: To be removed with `Eventable` trait
         let events: Vec<&Event> = fuzzy_events.iter().map(|fuzzy| &fuzzy.0).collect();
         let tree = Tree::from_indented_items(&items);
         let labels = tree_event_labels(&tree, &events);
@@ -849,7 +913,10 @@ D
         .collect();
         let tree_1 = Tree::from_indented_items(&items_1);
         let tree_2 = Tree::from_indented_items(&items_2);
-        let matching_bimap = matching_bimap(&tree_1, &tree_2, &items_1, &items_2);
+        let labels_1 = vec![0, 1, 2, 2, 2, 1, 2, 2, 1, 2];
+        let labels_2 = vec![0, 1, 2, 2, 1, 2, 1, 2, 2, 2];
+        let matching_bimap =
+            matching_bimap(&tree_1, &tree_2, &items_1, &items_2, &labels_1, &labels_2);
         assert_eq!(matching_bimap.len(), 5);
         let mut items_1_matched: Vec<&str> = matching_bimap
             .left_values()
