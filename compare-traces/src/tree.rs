@@ -7,42 +7,40 @@ use similar::{capture_diff_slices, DiffOp, TextDiff};
 
 use crate::event::{line_depth, Event};
 
-/// `None` is reserved for the root node.
-/// This allows nodes indices to remain in sync with those for the separate data array.
-/// JRS: This should be a proper wrapper type...
-/// A few places are using `None` to mean no value,
-/// which may cause confusion.
-type TreeNodeIndex = Option<usize>;
+/// A separate `Root` value is reserved for the root node.
+/// This allows node indices to remain in sync with those for the separate data array.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+enum TreeNodeIndex {
+    Root,
+    Node(usize),
+}
 
 #[derive(PartialEq, Eq, Debug)]
 struct TreeNode {
     index: TreeNodeIndex,
-    parent: TreeNodeIndex,
+    parent: Option<TreeNodeIndex>,
     children: Vec<TreeNodeIndex>,
 }
 
 impl TreeNode {
     fn new(index: usize, parent: TreeNodeIndex) -> TreeNode {
         TreeNode {
-            index: Some(index),
-            parent,
+            index: TreeNodeIndex::Node(index),
+            parent: Some(parent),
             children: Vec::new(),
         }
     }
 
     fn new_root() -> TreeNode {
         TreeNode {
-            index: None,
+            index: TreeNodeIndex::Root,
             parent: None,
             children: Vec::new(),
         }
     }
 
     fn parent<'tree>(&self, tree: &'tree Tree) -> Option<&'tree TreeNode> {
-        match &self.index {
-            Some(_) => Some(&tree[&self.parent]),
-            None => None,
-        }
+        self.parent.as_ref().map(|index| &tree[index])
     }
 
     fn child<'tree>(&self, tree: &'tree Tree, nth: usize) -> Option<&'tree TreeNode> {
@@ -58,7 +56,10 @@ impl TreeNode {
     }
 
     fn data<'container, T>(&self, container: &'container [T]) -> &'container T {
-        &container[self.index.unwrap()]
+        match self.index {
+            TreeNodeIndex::Node(i) => &container[i],
+            TreeNodeIndex::Root => unimplemented!(),
+        }
     }
 }
 
@@ -82,7 +83,7 @@ impl Tree {
     }
 
     fn root_index() -> TreeNodeIndex {
-        None
+        TreeNodeIndex::Root
     }
 
     fn root(&self) -> &TreeNode {
@@ -142,8 +143,8 @@ impl Index<&TreeNodeIndex> for Tree {
 
     fn index(&self, index: &TreeNodeIndex) -> &Self::Output {
         match *index {
-            Some(i) => &self.nodes[i],
-            None => &self.root,
+            TreeNodeIndex::Node(i) => &self.nodes[i],
+            TreeNodeIndex::Root => &self.root,
         }
     }
 }
@@ -151,8 +152,8 @@ impl Index<&TreeNodeIndex> for Tree {
 impl IndexMut<&TreeNodeIndex> for Tree {
     fn index_mut(&mut self, index: &TreeNodeIndex) -> &mut Self::Output {
         match *index {
-            Some(i) => &mut self.nodes[i],
-            None => &mut self.root,
+            TreeNodeIndex::Node(i) => &mut self.nodes[i],
+            TreeNodeIndex::Root => &mut self.root,
         }
     }
 }
@@ -191,7 +192,7 @@ impl<'tree> Iterator for TreeLeaves<'tree> {
 
 struct TreeLcs {
     matched: Vec<(TreeNodeIndex, TreeNodeIndex)>,
-    unmatched: Vec<(TreeNodeIndex, TreeNodeIndex)>,
+    unmatched: Vec<(Option<TreeNodeIndex>, Option<TreeNodeIndex>)>,
 }
 
 fn tree_leaves_lcs<T>(tree_a: &Tree, tree_b: &Tree, items_a: &[T], items_b: &[T]) -> TreeLcs
@@ -227,7 +228,7 @@ where
                 new_index: _,
             } => {
                 for i in 0..old_len {
-                    unmatched.push((leaves_a[old_index + i].index, None));
+                    unmatched.push((Some(leaves_a[old_index + i].index), None));
                 }
             }
             DiffOp::Insert {
@@ -236,7 +237,7 @@ where
                 new_len,
             } => {
                 for i in 0..new_len {
-                    unmatched.push((None, leaves_b[new_index + i].index));
+                    unmatched.push((None, Some(leaves_b[new_index + i].index)));
                 }
             }
             DiffOp::Replace {
@@ -246,10 +247,10 @@ where
                 new_len,
             } => {
                 for i in 0..old_len {
-                    unmatched.push((leaves_a[old_index + i].index, None));
+                    unmatched.push((Some(leaves_a[old_index + i].index), None));
                 }
                 for i in 0..new_len {
-                    unmatched.push((None, leaves_b[new_index + i].index));
+                    unmatched.push((None, Some(leaves_b[new_index + i].index)));
                 }
             }
         }
@@ -556,6 +557,7 @@ where
         .iter()
         .map(|index_pair| index_pair.0)
         .filter(|index| index.is_some())
+        .map(|index| index.unwrap())
         .collect();
     // Use `BTreeSet` with the after side for efficient removal when a match is found
     let mut after_leaves_unmatched: BTreeSet<TreeNodeIndex> = leaves_lcs
@@ -563,6 +565,7 @@ where
         .iter()
         .map(|index_pair| index_pair.1)
         .filter(|index| index.is_some())
+        .map(|index| index.unwrap())
         .collect();
     for before_leaf_index in &before_leaves_unmatched {
         let mut to_remove: Option<TreeNodeIndex> = None;
@@ -689,6 +692,7 @@ D
             .iter()
             .map(|index_pair| index_pair.0)
             .filter(|index| index.is_some())
+            .map(|index| index.unwrap())
             .map(|index| tree_1[&index].data(&items_1).trim())
             .collect();
         let items_2_lcs_unmatched: Vec<&str> = leaves_lcs
@@ -696,6 +700,7 @@ D
             .iter()
             .map(|index_pair| index_pair.1)
             .filter(|index| index.is_some())
+            .map(|index| index.unwrap())
             .map(|index| tree_2[&index].data(&items_2).trim())
             .collect();
         assert_eq!(items_1_lcs_unmatched, vec!["Sb", "Sf"]);
@@ -731,7 +736,10 @@ CF: system_path at exec-cmd.c:265:6
         let tree_1 = Tree::from_indented_items(&items_1);
         let tree_2 = Tree::from_indented_items(&items_2);
         let leaves_lcs = tree_leaves_lcs(&tree_1, &tree_2, &events_1, &events_2);
-        assert_eq!(leaves_lcs.matched, vec![(Some(1), Some(1))]);
+        assert_eq!(
+            leaves_lcs.matched,
+            vec![(TreeNodeIndex::Node(1), TreeNodeIndex::Node(1))]
+        );
     }
 
     #[test]
