@@ -592,6 +592,35 @@ where
     matching
 }
 
+pub fn diff_tree_chawathe<'content>(
+    before_content: &'content str,
+    after_content: &'content str,
+) -> TreeDiff<'content> {
+    let before_lines: Vec<_> = before_content.lines().collect();
+    let after_lines: Vec<_> = after_content.lines().collect();
+
+    // Parse lines into fuzzy events
+    let before_events: Vec<_> = before_lines
+        .iter()
+        .map(|line| FuzzyEvent(Event::parse(line).unwrap()))
+        .collect();
+    let after_events: Vec<_> = after_lines
+        .iter()
+        .map(|line| FuzzyEvent(Event::parse(line).unwrap()))
+        .collect();
+
+    // let mut ops = Vec::new();
+
+    // Convert lines into trees
+    let before_tree = Tree::from_indented_items(&before_lines);
+    let after_tree = Tree::from_indented_items(&after_lines);
+
+    // Build initial matching bimap
+    let matching = matching_bimap(&before_tree, &after_tree, &before_events, &after_events);
+
+    todo!()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
