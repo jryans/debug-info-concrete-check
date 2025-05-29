@@ -5,7 +5,7 @@ use std::ops::{Index, IndexMut};
 use bimap::BiHashMap;
 use similar::{capture_diff_slices, DiffOp, TextDiff};
 
-use crate::event::{line_depth, Event};
+use crate::event::{line_depth, Event, Eventable};
 
 /// A separate `Root` value is reserved for the root node.
 /// This allows node indices to remain in sync with those for the separate data array.
@@ -544,15 +544,20 @@ impl Hash for FuzzyEvent {
     }
 }
 
+impl Eventable for FuzzyEvent {
+    fn as_event(&self) -> &Event {
+        &self.0
+    }
+}
+
 /// Label each event by hashing all function names along its path in the tree.
-// TODO: Use an `Eventable` trait to reduce conversion work
-fn tree_event_labels(tree: &Tree, events: &[&Event]) -> Vec<u64> {
+fn tree_event_labels<E: Eventable>(tree: &Tree, events: &[E]) -> Vec<u64> {
     let mut hashers: Vec<DefaultHasher> = Vec::with_capacity(events.len());
 
     // For each event, look for parent's previously computed hasher,
     // and then add that event's own function name.
     for i in 0..events.len() {
-        let event = events[i];
+        let event = events[i].as_event();
         let node = &tree[&TreeNodeIndex::Node(i)];
         let parent_index = node.parent(tree).unwrap().index;
         let parent_hasher = match parent_index {
@@ -675,9 +680,6 @@ pub fn diff_tree_chawathe<'content>(
         .iter()
         .map(|line| FuzzyEvent(Event::parse(line).unwrap()))
         .collect();
-    // TODO: To be removed with `Eventable` trait
-    let before_unfuzzy_events: Vec<&Event> = before_events.iter().map(|fuzzy| &fuzzy.0).collect();
-    let after_unfuzzy_events: Vec<&Event> = after_events.iter().map(|fuzzy| &fuzzy.0).collect();
 
     // let mut ops = Vec::new();
 
@@ -686,8 +688,8 @@ pub fn diff_tree_chawathe<'content>(
     let after_tree = Tree::from_indented_items(&after_lines);
 
     // Collect tree event labels from function names along each node's tree path
-    let before_labels = tree_event_labels(&before_tree, &before_unfuzzy_events);
-    let after_labels = tree_event_labels(&after_tree, &after_unfuzzy_events);
+    let before_labels = tree_event_labels(&before_tree, &before_events);
+    let after_labels = tree_event_labels(&after_tree, &after_events);
 
     // Build initial matching bimap
     let matching = matching_bimap(
@@ -869,12 +871,10 @@ CF: system_path at exec-cmd.c:265:6
             .trim()
             .lines()
             .collect();
-        let fuzzy_events: Vec<_> = items
+        let events: Vec<_> = items
             .iter()
             .map(|line| FuzzyEvent(Event::parse(line).unwrap()))
             .collect();
-        // TODO: To be removed with `Eventable` trait
-        let events: Vec<&Event> = fuzzy_events.iter().map(|fuzzy| &fuzzy.0).collect();
         let tree = Tree::from_indented_items(&items);
         let labels = tree_event_labels(&tree, &events);
         assert_eq!(labels[1], labels[2]);

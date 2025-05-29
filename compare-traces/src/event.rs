@@ -129,3 +129,13 @@ impl Display for Event {
         write!(f, "{}: {}", self.event_type, self.detail)
     }
 }
+
+pub trait Eventable {
+    fn as_event(&self) -> &Event;
+}
+
+impl Eventable for Event {
+    fn as_event(&self) -> &Event {
+        self
+    }
+}
