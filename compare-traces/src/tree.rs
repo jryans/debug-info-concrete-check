@@ -534,6 +534,7 @@ impl Hash for FuzzyEvent {
 }
 
 /// Label each event by hashing all function names along its path in the tree.
+// TODO: Use an `Eventable` trait to reduce conversion work
 fn tree_event_labels(tree: &Tree, events: &[&Event]) -> Vec<u64> {
     let mut hashers: Vec<DefaultHasher> = Vec::with_capacity(events.len());
 
