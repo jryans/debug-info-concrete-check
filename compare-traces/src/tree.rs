@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::{Index, IndexMut};
 
@@ -138,10 +138,17 @@ impl Tree {
         tree
     }
 
+    fn bfs(&self) -> TreeBfs {
+        TreeBfs {
+            tree: &self,
+            queue: VecDeque::from([self.root()]),
+        }
+    }
+
     fn dfs(&self) -> TreeDfs {
         TreeDfs {
             tree: &self,
-            stack: vec![self.root()],
+            stack: Vec::from([self.root()]),
         }
     }
 }
@@ -163,6 +170,42 @@ impl IndexMut<&TreeNodeIndex> for Tree {
             TreeNodeIndex::Node(i) => &mut self.nodes[i],
             TreeNodeIndex::Root => &mut self.root,
         }
+    }
+}
+
+struct TreeBfs<'tree> {
+    tree: &'tree Tree,
+    queue: VecDeque<&'tree TreeNode>,
+}
+
+impl<'tree> Iterator for TreeBfs<'tree> {
+    type Item = &'tree TreeNode;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.queue.is_empty() {
+            return None;
+        }
+
+        while !self.queue.is_empty() {
+            // Pop from the back of the queue
+            let node = self.queue.pop_back().unwrap();
+            if node.is_leaf() {
+                // If `node` is a leaf, stop here for now
+                return Some(node);
+            } else {
+                // If `node` is a branch, push all children into the front of the queue
+                for i in 0..node.children.len() {
+                    self.queue.push_front(node.child(&self.tree, i).unwrap());
+                }
+                // For all non-root branches, stop here for now
+                if let TreeNodeIndex::Root = node.index {
+                    continue;
+                }
+                return Some(node);
+            }
+        }
+
+        return None;
     }
 }
 
@@ -829,6 +872,28 @@ mod tests {
         assert_eq!(node_1_0.data(&items).trim(), "1.0");
         let node_1_0_parent = node_1_0.parent(&tree).unwrap();
         assert_eq!(node_1_0_parent, node_1);
+    }
+
+    #[test]
+    fn tree_bfs() {
+        let items: Vec<_> = "
+0
+  0.0
+    0.0.0
+  0.1
+  0.2
+1
+  1.0
+    1.0.0"
+            .trim()
+            .lines()
+            .collect();
+        let tree = Tree::from_indented_items(&items);
+        let leaves: Vec<&str> = tree.bfs().map(|node| node.data(&items).trim()).collect();
+        assert_eq!(
+            leaves,
+            vec!["0", "1", "0.0", "0.1", "0.2", "1.0", "0.0.0", "1.0.0"]
+        );
     }
 
     #[test]
