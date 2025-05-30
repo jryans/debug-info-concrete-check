@@ -130,6 +130,13 @@ impl Tree {
         tree
     }
 
+    fn branches(&self) -> TreeBranches {
+        TreeBranches {
+            tree: &self,
+            stack: vec![self.root()],
+        }
+    }
+
     fn leaves(&self) -> TreeLeaves {
         TreeLeaves {
             tree: &self,
@@ -176,13 +183,48 @@ impl<'tree> Iterator for TreeLeaves<'tree> {
             // Pop from the end of the stack
             let node = self.stack.pop().unwrap();
             if node.children.is_empty() {
-                // If `node` is a leaf, we can stop here for now.
+                // If `node` is a leaf, we can stop here for now
                 return Some(node);
             } else {
-                // If `node` is a branch, push all children (in reverse for expected ordering).
+                // If `node` is a branch, push all children (in reverse for expected ordering)
                 for i in (0..node.children.len()).rev() {
                     self.stack.push(node.child(&self.tree, i).unwrap());
                 }
+            }
+        }
+
+        return None;
+    }
+}
+
+struct TreeBranches<'tree> {
+    tree: &'tree Tree,
+    stack: Vec<&'tree TreeNode>,
+}
+
+impl<'tree> Iterator for TreeBranches<'tree> {
+    type Item = &'tree TreeNode;
+
+    /// Advance to the next branch node
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.stack.is_empty() {
+            return None;
+        }
+
+        while !self.stack.is_empty() {
+            // Pop from the end of the stack
+            let node = self.stack.pop().unwrap();
+            if !node.children.is_empty() {
+                // If `node` is a branch, push all children (in reverse for expected ordering)
+                for i in (0..node.children.len()).rev() {
+                    self.stack.push(node.child(&self.tree, i).unwrap());
+                }
+                // Skip root
+                if let TreeNodeIndex::Root = node.index {
+                    continue;
+                }
+                // Visit branch
+                return Some(node);
             }
         }
 
@@ -752,6 +794,28 @@ mod tests {
         let tree = Tree::from_indented_items(&items);
         let leaves: Vec<&str> = tree.leaves().map(|node| node.data(&items).trim()).collect();
         assert_eq!(leaves, vec!["0.0.0", "0.1", "0.2", "1.0.0"]);
+    }
+
+    #[test]
+    fn tree_branches() {
+        let items: Vec<_> = "
+0
+  0.0
+    0.0.0
+  0.1
+  0.2
+1
+  1.0
+    1.0.0"
+            .trim()
+            .lines()
+            .collect();
+        let tree = Tree::from_indented_items(&items);
+        let branches: Vec<&str> = tree
+            .branches()
+            .map(|node| node.data(&items).trim())
+            .collect();
+        assert_eq!(branches, vec!["0", "0.0", "1", "1.0"]);
     }
 
     #[test]
