@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::{Index, IndexMut};
 
@@ -650,6 +650,7 @@ where
     // For each leaf label, find the LCS of the leaves and add this to the matching bimap
     let default_vec: Vec<TreeNodeIndex> = Vec::new();
     for leaf_label in before_leaves_by_label.keys() {
+        // TODO: Extract and share as much of this with branch loop below as possible
         let before_leaves = &before_leaves_by_label[leaf_label];
         let after_leaves = after_leaves_by_label
             .get(leaf_label)
@@ -697,11 +698,87 @@ where
         }
     }
 
-    // TODO: Add the branch nodes
+    // Group branches by label
+    let mut before_branches_by_label: BTreeMap<u64, Vec<TreeNodeIndex>> = BTreeMap::new();
+    for branch in before_tree.branches() {
+        let label = branch.data(before_labels);
+        before_branches_by_label
+            .entry(*label)
+            .or_default()
+            .push(branch.index);
+    }
+    let mut after_branches_by_label: HashMap<u64, Vec<TreeNodeIndex>> = HashMap::new();
+    for branch in after_tree.branches() {
+        let label = branch.data(after_labels);
+        after_branches_by_label
+            .entry(*label)
+            .or_default()
+            .push(branch.index);
+    }
 
-    // JRS: Hmm, even fast match seems to want to pairwise match the branch nodes, right...?
-    // Perhaps go through what remains in trace order and accept the first match found among
-    // unmatched...? Ensure function names of all parents match.
+    // For each branch label, find the LCS of the branches and add this to the matching bimap
+    // Look for branch labels somewhat naively by walking backwards through the trace labels
+    // (since branches at the end of the trace are deeper and likely to ready for comparison)
+    let mut before_visited: HashSet<TreeNodeIndex> = HashSet::new();
+    before_visited.extend(before_tree.leaves().map(|node| node.index));
+    for branch_label in before_branches_by_label.keys().rev() {
+        let before_branches = &before_branches_by_label[branch_label];
+        let after_branches = after_branches_by_label
+            .get(branch_label)
+            .unwrap_or(&default_vec);
+        // Ensure we've tried to match all children of these branches
+        let all_before_children_visited: bool = before_branches
+            .iter()
+            .flat_map(|branch_index| before_tree[branch_index].children.iter())
+            .all(|child_index| before_visited.contains(child_index));
+        assert!(all_before_children_visited);
+
+        // JRS: Need to extend equality to check portion of children in common...
+        // Or alternatively, skip LCS and compare pair-wise only...
+        // For now, let's try pair-wise only.
+
+        // Match any remaining branches to their first trace-order match
+        let before_branches_unmatched: Vec<TreeNodeIndex> =
+            before_branches.iter().cloned().collect();
+        // Use `BTreeSet` with the after side for efficient removal when a match is found
+        let mut after_branches_unmatched: BTreeSet<TreeNodeIndex> =
+            after_branches.iter().cloned().collect();
+        for before_branch_index in &before_branches_unmatched {
+            let mut to_remove: Option<TreeNodeIndex> = None;
+            for after_branch_index in &after_branches_unmatched {
+                let before_branch = &before_tree[before_branch_index];
+                let after_branch = &after_tree[after_branch_index];
+                let before_branch_item = before_branch.data(&before_items);
+                let after_branch_item = after_branch.data(&after_items);
+                if before_branch_item == after_branch_item {
+                    // With branches, we also check children in common
+                    let before_children: &Vec<TreeNodeIndex> = &before_branch.children;
+                    let after_children: HashSet<TreeNodeIndex> =
+                        after_branch.children.iter().cloned().collect();
+                    let max_children: f64 = before_children.len().max(after_children.len()) as f64;
+                    let common_children: f64 = before_children
+                        .iter()
+                        .map(|before_index| matching.get_by_left(before_index))
+                        .filter(|possible_match| possible_match.is_some())
+                        .map(|after_index| after_children.contains(after_index.unwrap()))
+                        .filter(|child_found| *child_found)
+                        .count() as f64;
+                    let common_ratio: f64 = common_children / max_children;
+                    if common_ratio >= 0.5 {
+                        matching.insert(*before_branch_index, *after_branch_index);
+                        to_remove = Some(*after_branch_index);
+                        break;
+                    }
+                }
+            }
+            if let Some(index) = to_remove {
+                after_branches_unmatched.remove(&index);
+            }
+        }
+
+        // Add these branches to the visited set
+        before_visited.extend(before_branches);
+    }
 
     matching
 }
@@ -946,7 +1023,7 @@ CF: system_path at exec-cmd.c:265:6
     }
 
     #[test]
-    fn tree_leaves_matching_bimap() {
+    fn tree_matching_bimap() {
         let items_1: Vec<_> = "
 D
   P
@@ -981,7 +1058,7 @@ D
         let labels_2 = vec![0, 1, 2, 2, 1, 2, 1, 2, 2, 2];
         let matching_bimap =
             matching_bimap(&tree_1, &tree_2, &items_1, &items_2, &labels_1, &labels_2);
-        assert_eq!(matching_bimap.len(), 5);
+        assert_eq!(matching_bimap.len(), 9);
         let mut items_1_matched: Vec<&str> = matching_bimap
             .left_values()
             .map(|index| tree_1[&index].data(&items_1).trim())
@@ -993,7 +1070,10 @@ D
             .collect();
         items_2_matched.sort();
         assert_eq!(items_1_matched, items_2_matched);
-        assert_eq!(items_1_matched, vec!["Sa", "Sc", "Sd", "Se", "Sf"]);
+        assert_eq!(
+            items_1_matched,
+            vec!["D", "P", "P", "P", "Sa", "Sc", "Sd", "Se", "Sf"]
+        );
     }
 
     #[test]
