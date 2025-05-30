@@ -55,6 +55,14 @@ impl TreeNode {
         self.children.last().map(|index| &tree[index])
     }
 
+    fn is_leaf(&self) -> bool {
+        self.children.is_empty()
+    }
+
+    fn is_branch(&self) -> bool {
+        !self.is_leaf()
+    }
+
     fn data<'container, T>(&self, container: &'container [T]) -> &'container T {
         match self.index {
             TreeNodeIndex::Node(i) => &container[i],
@@ -130,15 +138,8 @@ impl Tree {
         tree
     }
 
-    fn branches(&self) -> TreeBranches {
-        TreeBranches {
-            tree: &self,
-            stack: vec![self.root()],
-        }
-    }
-
-    fn leaves(&self) -> TreeLeaves {
-        TreeLeaves {
+    fn dfs(&self) -> TreeDfs {
+        TreeDfs {
             tree: &self,
             stack: vec![self.root()],
         }
@@ -165,15 +166,14 @@ impl IndexMut<&TreeNodeIndex> for Tree {
     }
 }
 
-struct TreeLeaves<'tree> {
+struct TreeDfs<'tree> {
     tree: &'tree Tree,
     stack: Vec<&'tree TreeNode>,
 }
 
-impl<'tree> Iterator for TreeLeaves<'tree> {
+impl<'tree> Iterator for TreeDfs<'tree> {
     type Item = &'tree TreeNode;
 
-    /// Advance to the next leaf node
     fn next(&mut self) -> Option<Self::Item> {
         if self.stack.is_empty() {
             return None;
@@ -182,48 +182,18 @@ impl<'tree> Iterator for TreeLeaves<'tree> {
         while !self.stack.is_empty() {
             // Pop from the end of the stack
             let node = self.stack.pop().unwrap();
-            if node.children.is_empty() {
-                // If `node` is a leaf, we can stop here for now
+            if node.is_leaf() {
+                // If `node` is a leaf, stop here for now
                 return Some(node);
             } else {
                 // If `node` is a branch, push all children (in reverse for expected ordering)
                 for i in (0..node.children.len()).rev() {
                     self.stack.push(node.child(&self.tree, i).unwrap());
                 }
-            }
-        }
-
-        return None;
-    }
-}
-
-struct TreeBranches<'tree> {
-    tree: &'tree Tree,
-    stack: Vec<&'tree TreeNode>,
-}
-
-impl<'tree> Iterator for TreeBranches<'tree> {
-    type Item = &'tree TreeNode;
-
-    /// Advance to the next branch node
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.stack.is_empty() {
-            return None;
-        }
-
-        while !self.stack.is_empty() {
-            // Pop from the end of the stack
-            let node = self.stack.pop().unwrap();
-            if !node.children.is_empty() {
-                // If `node` is a branch, push all children (in reverse for expected ordering)
-                for i in (0..node.children.len()).rev() {
-                    self.stack.push(node.child(&self.tree, i).unwrap());
-                }
-                // Skip root
+                // For all non-root branches, stop here for now
                 if let TreeNodeIndex::Root = node.index {
                     continue;
                 }
-                // Visit branch
                 return Some(node);
             }
         }
@@ -231,6 +201,8 @@ impl<'tree> Iterator for TreeBranches<'tree> {
         return None;
     }
 }
+
+// TODO: Add `leaves` and `branches` filters to all tree iterators
 
 struct TreeLcs {
     matched: Vec<(TreeNodeIndex, TreeNodeIndex)>,
@@ -631,7 +603,7 @@ where
 
     // Group leaves by label
     let mut before_leaves_by_label: HashMap<u64, Vec<TreeNodeIndex>> = HashMap::new();
-    for leaf in before_tree.leaves() {
+    for leaf in before_tree.dfs().filter(|node| node.is_leaf()) {
         let label = leaf.data(before_labels);
         before_leaves_by_label
             .entry(*label)
@@ -639,7 +611,7 @@ where
             .push(leaf.index);
     }
     let mut after_leaves_by_label: HashMap<u64, Vec<TreeNodeIndex>> = HashMap::new();
-    for leaf in after_tree.leaves() {
+    for leaf in after_tree.dfs().filter(|node| node.is_leaf()) {
         let label = leaf.data(after_labels);
         after_leaves_by_label
             .entry(*label)
@@ -700,7 +672,7 @@ where
 
     // Group branches by label
     let mut before_branches_by_label: BTreeMap<u64, Vec<TreeNodeIndex>> = BTreeMap::new();
-    for branch in before_tree.branches() {
+    for branch in before_tree.dfs().filter(|node| node.is_branch()) {
         let label = branch.data(before_labels);
         before_branches_by_label
             .entry(*label)
@@ -708,7 +680,7 @@ where
             .push(branch.index);
     }
     let mut after_branches_by_label: HashMap<u64, Vec<TreeNodeIndex>> = HashMap::new();
-    for branch in after_tree.branches() {
+    for branch in after_tree.dfs().filter(|node| node.is_branch()) {
         let label = branch.data(after_labels);
         after_branches_by_label
             .entry(*label)
@@ -720,7 +692,12 @@ where
     // Look for branch labels somewhat naively by walking backwards through the trace labels
     // (since branches at the end of the trace are deeper and likely to ready for comparison)
     let mut before_visited: HashSet<TreeNodeIndex> = HashSet::new();
-    before_visited.extend(before_tree.leaves().map(|node| node.index));
+    before_visited.extend(
+        before_tree
+            .dfs()
+            .filter(|node| node.is_leaf())
+            .map(|node| node.index),
+    );
     for branch_label in before_branches_by_label.keys().rev() {
         let before_branches = &before_branches_by_label[branch_label];
         let after_branches = after_branches_by_label
@@ -855,7 +832,7 @@ mod tests {
     }
 
     #[test]
-    fn tree_leaves() {
+    fn tree_dfs_leaves() {
         let items: Vec<_> = "
 0
   0.0
@@ -869,12 +846,16 @@ mod tests {
             .lines()
             .collect();
         let tree = Tree::from_indented_items(&items);
-        let leaves: Vec<&str> = tree.leaves().map(|node| node.data(&items).trim()).collect();
+        let leaves: Vec<&str> = tree
+            .dfs()
+            .filter(|node| node.is_leaf())
+            .map(|node| node.data(&items).trim())
+            .collect();
         assert_eq!(leaves, vec!["0.0.0", "0.1", "0.2", "1.0.0"]);
     }
 
     #[test]
-    fn tree_branches() {
+    fn tree_dfs_branches() {
         let items: Vec<_> = "
 0
   0.0
@@ -889,7 +870,8 @@ mod tests {
             .collect();
         let tree = Tree::from_indented_items(&items);
         let branches: Vec<&str> = tree
-            .branches()
+            .dfs()
+            .filter(|node| node.is_branch())
             .map(|node| node.data(&items).trim())
             .collect();
         assert_eq!(branches, vec!["0", "0.0", "1", "1.0"]);
@@ -927,8 +909,16 @@ D
         .collect();
         let tree_1 = Tree::from_indented_items(&items_1);
         let tree_2 = Tree::from_indented_items(&items_2);
-        let leaves_1: Vec<TreeNodeIndex> = tree_1.leaves().map(|node| node.index).collect();
-        let leaves_2: Vec<TreeNodeIndex> = tree_2.leaves().map(|node| node.index).collect();
+        let leaves_1: Vec<TreeNodeIndex> = tree_1
+            .dfs()
+            .filter(|node| node.is_leaf())
+            .map(|node| node.index)
+            .collect();
+        let leaves_2: Vec<TreeNodeIndex> = tree_2
+            .dfs()
+            .filter(|node| node.is_leaf())
+            .map(|node| node.index)
+            .collect();
         let leaves_lcs =
             tree_subset_lcs(&tree_1, &tree_2, &items_1, &items_2, &leaves_1, &leaves_2);
         let items_1_lcs_matched: Vec<&str> = leaves_lcs
@@ -991,8 +981,16 @@ CF: system_path at exec-cmd.c:265:6
             .collect();
         let tree_1 = Tree::from_indented_items(&items_1);
         let tree_2 = Tree::from_indented_items(&items_2);
-        let leaves_1: Vec<TreeNodeIndex> = tree_1.leaves().map(|node| node.index).collect();
-        let leaves_2: Vec<TreeNodeIndex> = tree_2.leaves().map(|node| node.index).collect();
+        let leaves_1: Vec<TreeNodeIndex> = tree_1
+            .dfs()
+            .filter(|node| node.is_leaf())
+            .map(|node| node.index)
+            .collect();
+        let leaves_2: Vec<TreeNodeIndex> = tree_2
+            .dfs()
+            .filter(|node| node.is_leaf())
+            .map(|node| node.index)
+            .collect();
         let leaves_lcs =
             tree_subset_lcs(&tree_1, &tree_2, &events_1, &events_2, &leaves_1, &leaves_2);
         assert_eq!(
