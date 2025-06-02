@@ -252,7 +252,12 @@ struct TreeLcs {
     unmatched: Vec<(Option<TreeNodeIndex>, Option<TreeNodeIndex>)>,
 }
 
-fn tree_subset_lcs<T>(
+/// Finds a longest common subsequence (LCS) by comparing
+/// a subset of separately stored tree data items.
+/// The `items` arrays cover the entire tree.
+/// The `subset` arrays contain only the indices of interest.
+// TODO: Express this in terms of `tree_indexable_subset_lcs`
+fn tree_items_subset_lcs<T>(
     tree_a: &Tree,
     tree_b: &Tree,
     items_a: &[T],
@@ -274,8 +279,8 @@ where
         .collect();
     // TODO: Consider using `similar::IdentifyDistinct` for large inputs
     let diff_ops = capture_diff_slices(similar::Algorithm::Myers, &subset_a_items, &subset_b_items);
-    let mut matched = Vec::new();
-    let mut unmatched = Vec::new();
+    let mut matched: Vec<(TreeNodeIndex, TreeNodeIndex)> = Vec::new();
+    let mut unmatched: Vec<(Option<TreeNodeIndex>, Option<TreeNodeIndex>)> = Vec::new();
     for diff_op in diff_ops {
         // Translate subset indices back up to tree indices
         // JRS: Should keep these small summary representations,
@@ -319,6 +324,88 @@ where
                 }
                 for i in 0..new_len {
                     unmatched.push((None, Some(subset_b[new_index + i])));
+                }
+            }
+        }
+    }
+    TreeLcs { matched, unmatched }
+}
+
+trait TreeNodeIndexable {
+    fn index(&self) -> &TreeNodeIndex;
+}
+
+impl TreeNodeIndexable for TreeNodeIndex {
+    fn index(&self) -> &TreeNodeIndex {
+        self
+    }
+}
+
+impl TreeNodeIndexable for TreeNode {
+    fn index(&self) -> &TreeNodeIndex {
+        &self.index
+    }
+}
+
+/// Finds a longest common subsequence (LCS) by comparing
+/// a subset of tree data items that know their own index.
+/// Equality is determined by the item's `Eq` implementation (not the index).
+/// The `subset` arrays contain only the (indexable) items of interest.
+fn tree_indexable_subset_lcs<T>(subset_a: &[T], subset_b: &[T]) -> TreeLcs
+where
+    // `Hash` and `Ord` do not appear to actually be used by the diff algorithm
+    T: TreeNodeIndexable + Eq + Hash + Ord,
+{
+    // TODO: Consider using `similar::IdentifyDistinct` for large inputs
+    let diff_ops = capture_diff_slices(similar::Algorithm::Myers, &subset_a, &subset_b);
+    let mut matched: Vec<(TreeNodeIndex, TreeNodeIndex)> = Vec::new();
+    let mut unmatched: Vec<(Option<TreeNodeIndex>, Option<TreeNodeIndex>)> = Vec::new();
+    for diff_op in diff_ops {
+        // Translate subset indices back up to tree indices
+        // JRS: Should keep these small summary representations,
+        // instead of inflating them to cover each item...?
+        match diff_op {
+            DiffOp::Equal {
+                old_index,
+                new_index,
+                len,
+            } => {
+                for i in 0..len {
+                    matched.push((
+                        *subset_a[old_index + i].index(),
+                        *subset_b[new_index + i].index(),
+                    ));
+                }
+            }
+            DiffOp::Delete {
+                old_index,
+                old_len,
+                new_index: _,
+            } => {
+                for i in 0..old_len {
+                    unmatched.push((Some(*subset_a[old_index + i].index()), None));
+                }
+            }
+            DiffOp::Insert {
+                old_index: _,
+                new_index,
+                new_len,
+            } => {
+                for i in 0..new_len {
+                    unmatched.push((None, Some(*subset_b[new_index + i].index())));
+                }
+            }
+            DiffOp::Replace {
+                old_index,
+                old_len,
+                new_index,
+                new_len,
+            } => {
+                for i in 0..old_len {
+                    unmatched.push((Some(*subset_a[old_index + i].index()), None));
+                }
+                for i in 0..new_len {
+                    unmatched.push((None, Some(*subset_b[new_index + i].index())));
                 }
             }
         }
@@ -670,7 +757,7 @@ where
         let after_leaves = after_leaves_by_label
             .get(leaf_label)
             .unwrap_or(&default_vec);
-        let leaves_lcs = tree_subset_lcs(
+        let leaves_lcs = tree_items_subset_lcs(
             before_tree,
             after_tree,
             before_items,
@@ -985,7 +1072,7 @@ D
             .map(|node| node.index)
             .collect();
         let leaves_lcs =
-            tree_subset_lcs(&tree_1, &tree_2, &items_1, &items_2, &leaves_1, &leaves_2);
+            tree_items_subset_lcs(&tree_1, &tree_2, &items_1, &items_2, &leaves_1, &leaves_2);
         let items_1_lcs_matched: Vec<&str> = leaves_lcs
             .matched
             .iter()
@@ -1057,10 +1144,23 @@ CF: system_path at exec-cmd.c:265:6
             .map(|node| node.index)
             .collect();
         let leaves_lcs =
-            tree_subset_lcs(&tree_1, &tree_2, &events_1, &events_2, &leaves_1, &leaves_2);
+            tree_items_subset_lcs(&tree_1, &tree_2, &events_1, &events_2, &leaves_1, &leaves_2);
         assert_eq!(
             leaves_lcs.matched,
             vec![(TreeNodeIndex::Node(1), TreeNodeIndex::Node(1))]
+        );
+    }
+
+    #[test]
+    fn tree_indexable_lcs() {
+        let indices_1: Vec<TreeNodeIndex> = (0..6).map(|i| TreeNodeIndex::Node(i)).collect();
+        let indices_2: Vec<TreeNodeIndex> = (2..10).map(|i| TreeNodeIndex::Node(i)).collect();
+        let lcs = tree_indexable_subset_lcs(&indices_1, &indices_2);
+        assert_eq!(lcs.matched.len(), 4);
+        assert!(lcs.matched.iter().all(|(l, r)| l == r));
+        assert_eq!(
+            lcs.matched.iter().map(|(l, _)| *l).collect::<Vec<_>>(),
+            (2..6).map(|i| TreeNodeIndex::Node(i)).collect::<Vec<_>>()
         );
     }
 
