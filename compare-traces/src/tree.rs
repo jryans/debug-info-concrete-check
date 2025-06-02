@@ -252,85 +252,6 @@ struct TreeLcs {
     unmatched: Vec<(Option<TreeNodeIndex>, Option<TreeNodeIndex>)>,
 }
 
-/// Finds a longest common subsequence (LCS) by comparing
-/// a subset of separately stored tree data items.
-/// The `items` arrays cover the entire tree.
-/// The `subset` arrays contain only the indices of interest.
-// TODO: Express this in terms of `tree_indexable_subset_lcs`
-fn tree_items_subset_lcs<T>(
-    tree_a: &Tree,
-    tree_b: &Tree,
-    items_a: &[T],
-    items_b: &[T],
-    subset_a: &[TreeNodeIndex],
-    subset_b: &[TreeNodeIndex],
-) -> TreeLcs
-where
-    // `Hash` and `Ord` do not appear to actually be used by the diff algorithm
-    T: Eq + Hash + Ord,
-{
-    let subset_a_items: Vec<&T> = subset_a
-        .iter()
-        .map(|index| tree_a[index].data(&items_a))
-        .collect();
-    let subset_b_items: Vec<&T> = subset_b
-        .iter()
-        .map(|index| tree_b[index].data(&items_b))
-        .collect();
-    // TODO: Consider using `similar::IdentifyDistinct` for large inputs
-    let diff_ops = capture_diff_slices(similar::Algorithm::Myers, &subset_a_items, &subset_b_items);
-    let mut matched: Vec<(TreeNodeIndex, TreeNodeIndex)> = Vec::new();
-    let mut unmatched: Vec<(Option<TreeNodeIndex>, Option<TreeNodeIndex>)> = Vec::new();
-    for diff_op in diff_ops {
-        // Translate subset indices back up to tree indices
-        // JRS: Should keep these small summary representations,
-        // instead of inflating them to cover each item...?
-        match diff_op {
-            DiffOp::Equal {
-                old_index,
-                new_index,
-                len,
-            } => {
-                for i in 0..len {
-                    matched.push((subset_a[old_index + i], subset_b[new_index + i]));
-                }
-            }
-            DiffOp::Delete {
-                old_index,
-                old_len,
-                new_index: _,
-            } => {
-                for i in 0..old_len {
-                    unmatched.push((Some(subset_a[old_index + i]), None));
-                }
-            }
-            DiffOp::Insert {
-                old_index: _,
-                new_index,
-                new_len,
-            } => {
-                for i in 0..new_len {
-                    unmatched.push((None, Some(subset_b[new_index + i])));
-                }
-            }
-            DiffOp::Replace {
-                old_index,
-                old_len,
-                new_index,
-                new_len,
-            } => {
-                for i in 0..old_len {
-                    unmatched.push((Some(subset_a[old_index + i]), None));
-                }
-                for i in 0..new_len {
-                    unmatched.push((None, Some(subset_b[new_index + i])));
-                }
-            }
-        }
-    }
-    TreeLcs { matched, unmatched }
-}
-
 trait TreeNodeIndexable {
     fn index(&self) -> &TreeNodeIndex;
 }
@@ -411,6 +332,79 @@ where
         }
     }
     TreeLcs { matched, unmatched }
+}
+
+struct TreeNodeBundledItem<'items, T> {
+    index: TreeNodeIndex,
+    item: &'items T,
+}
+
+impl<T> TreeNodeIndexable for TreeNodeBundledItem<'_, T> {
+    fn index(&self) -> &TreeNodeIndex {
+        &self.index
+    }
+}
+
+impl<T: PartialEq> PartialEq for TreeNodeBundledItem<'_, T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.item.eq(other.item)
+    }
+}
+
+impl<T: Eq> Eq for TreeNodeBundledItem<'_, T> {}
+
+// JRS: May need to adjust `Ord` and `Hash` to match `Eq`...
+// So far, they appear to not be used by the diff algorithms we're applying.
+
+impl<T: PartialEq> PartialOrd for TreeNodeBundledItem<'_, T> {
+    fn partial_cmp(&self, _other: &Self) -> Option<std::cmp::Ordering> {
+        todo!()
+    }
+}
+
+impl<T: Eq> Ord for TreeNodeBundledItem<'_, T> {
+    fn cmp(&self, _other: &Self) -> std::cmp::Ordering {
+        todo!()
+    }
+}
+
+impl<T> Hash for TreeNodeBundledItem<'_, T> {
+    fn hash<H: std::hash::Hasher>(&self, _state: &mut H) {
+        todo!()
+    }
+}
+
+/// Finds a longest common subsequence (LCS) by comparing
+/// a subset of separately stored tree data items.
+/// The `items` arrays cover the entire tree.
+/// The `subset` arrays contain only the indices of interest.
+fn tree_items_subset_lcs<T>(
+    tree_a: &Tree,
+    tree_b: &Tree,
+    items_a: &[T],
+    items_b: &[T],
+    subset_a: &[TreeNodeIndex],
+    subset_b: &[TreeNodeIndex],
+) -> TreeLcs
+where
+    // `Hash` and `Ord` do not appear to actually be used by the diff algorithm
+    T: Eq + Hash + Ord,
+{
+    let subset_a_bundled_items: Vec<TreeNodeBundledItem<T>> = subset_a
+        .iter()
+        .map(|index| TreeNodeBundledItem {
+            index: *index,
+            item: tree_a[index].data(&items_a),
+        })
+        .collect();
+    let subset_b_bundled_items: Vec<TreeNodeBundledItem<T>> = subset_b
+        .iter()
+        .map(|index| TreeNodeBundledItem {
+            index: *index,
+            item: tree_b[index].data(&items_b),
+        })
+        .collect();
+    tree_indexable_subset_lcs(&subset_a_bundled_items, &subset_b_bundled_items)
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
