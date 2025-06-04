@@ -69,6 +69,29 @@ impl TreeNode {
             TreeNodeIndex::Root => unimplemented!(),
         }
     }
+
+    // JRS: Maybe move this to the tree...?
+    fn edit(&mut self, edit: &TreeEditOp) {
+        match edit {
+            TreeEditOp::Move {
+                before_index,
+                parent_index,
+                child_position,
+            } => {
+                // We expect move edits to be passed to the current parent
+                // Changing parents is not expected with our tree semantics
+                assert!(self.index == *parent_index);
+                let current_child_position = self
+                    .children
+                    .iter()
+                    .position(|child_index| child_index == before_index)
+                    .unwrap();
+                let child = self.children.remove(current_child_position);
+                self.children.insert(*child_position, child);
+            }
+            _ => unimplemented!(),
+        }
+    }
 }
 
 /// Tree built from / overlaid onto a separate array.
@@ -407,6 +430,38 @@ where
     tree_indexable_subset_lcs(&subset_a_bundled_items, &subset_b_bundled_items)
 }
 
+// Tree edits that transform the before tree into the after tree
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+enum TreeEditOp {
+    Add {
+        /// Node index in after tree
+        after_index: TreeNodeIndex,
+        /// New parent node index in before tree
+        parent_index: TreeNodeIndex,
+        /// Position in new parent node's children
+        child_position: usize,
+    },
+    Remove {
+        /// Node index in before tree
+        before_index: TreeNodeIndex,
+    },
+    Replace {
+        /// Node index in before tree
+        before_index: TreeNodeIndex,
+        /// Replacing node index in after tree
+        after_index: TreeNodeIndex,
+    },
+    Move {
+        /// Node index in before tree
+        before_index: TreeNodeIndex,
+        /// New parent node index in before tree
+        parent_index: TreeNodeIndex,
+        /// Position in new parent node's children
+        child_position: usize,
+    },
+}
+
+// Diff result in terms of lines
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 pub enum TreeDiffOp {
     Add {
@@ -423,14 +478,12 @@ pub enum TreeDiffOp {
         /// Index of replaced line in after content
         after_index: usize,
     },
-    // // JRS: Unclear if we'll actually support this...
-    // Reorder {
-    //     /// Index of reordered line in before content
-    //     before_index: usize,
-    //     /// Index of reordered line in after content
-    //     after_index: usize,
-    //     // JRS: Do we also want indices within their stack frame?
-    // },
+    Move {
+        /// Index of reordered line in before content
+        before_index: usize,
+        /// Index of reordered line in after content
+        after_index: usize,
+    },
 }
 
 #[derive(Debug)]
@@ -884,6 +937,220 @@ where
     matching
 }
 
+#[derive(PartialEq, Eq)]
+enum DiffSide {
+    Before,
+    After,
+}
+
+/// Override `TreeNodeIndex` equality to mean partner from matching bimap
+struct MatchingTreeNodeIndex {
+    side: DiffSide,
+    index: TreeNodeIndex,
+    partner: TreeNodeIndex,
+}
+
+impl PartialEq for MatchingTreeNodeIndex {
+    fn eq(&self, other: &Self) -> bool {
+        assert!(self.side != other.side);
+        other.index == self.partner
+    }
+}
+
+impl Eq for MatchingTreeNodeIndex {}
+
+// JRS: May need to adjust `Ord` and `Hash` to match `Eq`...
+// So far, they appear to not be used by the diff algorithms we're applying.
+
+impl PartialOrd for MatchingTreeNodeIndex {
+    fn partial_cmp(&self, _other: &Self) -> Option<std::cmp::Ordering> {
+        todo!()
+    }
+}
+
+impl Ord for MatchingTreeNodeIndex {
+    fn cmp(&self, _other: &Self) -> std::cmp::Ordering {
+        todo!()
+    }
+}
+
+impl Hash for MatchingTreeNodeIndex {
+    fn hash<H: std::hash::Hasher>(&self, _state: &mut H) {
+        todo!()
+    }
+}
+
+impl TreeNodeIndexable for MatchingTreeNodeIndex {
+    fn index(&self) -> &TreeNodeIndex {
+        &self.index
+    }
+}
+
+fn align_children(
+    before_tree: &mut Tree,
+    after_tree: &Tree,
+    matching: &BiHashMap<TreeNodeIndex, TreeNodeIndex>,
+    before_parent_index: &TreeNodeIndex,
+    after_parent_index: &TreeNodeIndex,
+    before_in_order: &mut HashSet<TreeNodeIndex>,
+    after_in_order: &mut HashSet<TreeNodeIndex>,
+) -> Vec<TreeEditOp> {
+    let mut ops = Vec::new();
+
+    let before_parent = &before_tree[before_parent_index];
+    let after_parent = &after_tree[after_parent_index];
+
+    // Mark all children of before and after nodes as out of order
+    for before_child_index in &before_parent.children {
+        before_in_order.remove(before_child_index);
+    }
+    for after_child_index in &after_parent.children {
+        after_in_order.remove(after_child_index);
+    }
+
+    // Look for children that have a match in each matched parent
+    let mut before_children_matched_to_after_children: Vec<MatchingTreeNodeIndex> = Vec::new();
+    for before_child_index in &before_parent.children {
+        if let Some(partner_index) = matching.get_by_left(before_child_index) {
+            let partner_node = &after_tree[partner_index];
+            if partner_node.parent.unwrap() != *after_parent_index {
+                continue;
+            }
+            before_children_matched_to_after_children.push(MatchingTreeNodeIndex {
+                side: DiffSide::Before,
+                index: *before_child_index,
+                partner: *partner_index,
+            });
+        }
+    }
+    let mut after_children_matched_to_before_children: Vec<MatchingTreeNodeIndex> = Vec::new();
+    for after_child_index in &after_parent.children {
+        if let Some(partner_index) = matching.get_by_right(after_child_index) {
+            let partner_node = &before_tree[partner_index];
+            if partner_node.parent.unwrap() != *before_parent_index {
+                continue;
+            }
+            after_children_matched_to_before_children.push(MatchingTreeNodeIndex {
+                side: DiffSide::After,
+                index: *after_child_index,
+                partner: *partner_index,
+            });
+        }
+    }
+
+    // Find LCS of these cross-matched children
+    let children_lcs = tree_indexable_subset_lcs(
+        &before_children_matched_to_after_children,
+        &after_children_matched_to_before_children,
+    );
+
+    // Mark children in the LCS as in order
+    for (before_child_index, after_child_index) in &children_lcs.matched {
+        before_in_order.insert(*before_child_index);
+        after_in_order.insert(*after_child_index);
+    }
+
+    // For each matched child outside the LCS,
+    // move to expected position by examining after parent
+    let after_children_outside_lcs = children_lcs
+        .unmatched
+        .iter()
+        .map(|(_, after)| after)
+        .filter(|possible_after| possible_after.is_some())
+        .map(|after| after.as_ref().unwrap());
+    for after_child_index in after_children_outside_lcs {
+        let before_child_index = matching.get_by_right(after_child_index).unwrap();
+        let child_position = find_position_in_parent(
+            before_tree,
+            after_tree,
+            matching,
+            after_child_index,
+            before_in_order,
+            after_in_order,
+        );
+        let op = TreeEditOp::Move {
+            before_index: *before_child_index,
+            parent_index: *before_parent_index,
+            child_position,
+        };
+        // Apply move to before tree (via parent) and add to ops
+        before_tree[before_parent_index].edit(&op);
+        ops.push(op);
+        // Mark children as in order
+        before_in_order.insert(*before_child_index);
+        after_in_order.insert(*after_child_index);
+    }
+
+    ops
+}
+
+/// Returns intended 0-based position of node in parent
+fn find_position_in_parent(
+    before_tree: &Tree,
+    after_tree: &Tree,
+    matching: &BiHashMap<TreeNodeIndex, TreeNodeIndex>,
+    after_child_index: &TreeNodeIndex,
+    before_in_order: &HashSet<TreeNodeIndex>,
+    after_in_order: &HashSet<TreeNodeIndex>,
+) -> usize {
+    let after_child = &after_tree[after_child_index];
+    let after_parent = after_child.parent(after_tree).unwrap();
+    // Check if after child is left-most child marked as in order
+    for after_index_to_check in &after_parent.children {
+        if !after_in_order.contains(after_index_to_check) {
+            continue;
+        }
+        if after_index_to_check == after_child_index {
+            return 0;
+        }
+        break;
+    }
+    // Find right-most sibling to the left of after child that is in order
+    let after_child_position = after_parent
+        .children
+        .iter()
+        .position(|child_index| child_index == after_child_index)
+        .unwrap();
+    let mut after_sibling_index = None;
+    for after_index_to_check in after_parent.children[0..after_child_position].iter().rev() {
+        if !after_in_order.contains(after_index_to_check) {
+            continue;
+        }
+        after_sibling_index = Some(*after_index_to_check);
+        break;
+    }
+    assert!(after_sibling_index.is_some());
+    // Find position of its matched before node, counting _in-order_ siblings only
+    let before_sibling_index = matching
+        .get_by_right(&after_sibling_index.unwrap())
+        .unwrap();
+    let before_sibling = &before_tree[before_sibling_index];
+    let before_parent = before_sibling.parent(before_tree).unwrap();
+    // JRS: Below seems to be what the algorithm says to do,
+    // but doesn't appear to work in practice.
+    // let mut before_in_order_siblings: usize = 0;
+    // for before_index_to_check in &before_parent.children {
+    //     if before_in_order.contains(before_index_to_check) {
+    //         before_in_order_siblings += 1;
+    //     }
+    //     if before_index_to_check == before_sibling_index {
+    //         // Count of in-order siblings also gives the position node should move to
+    //         return before_in_order_siblings;
+    //     }
+    // }
+    // JRS: After trying a few examples,
+    // I think the position of the before sibling is what we want
+    // For node moves, the node will be moved to _after_ this sibling
+    // (because moving node has the same parent and is removed first)
+    // TODO: Check this logic for other edit ops
+    let before_sibling_position = before_parent
+        .children
+        .iter()
+        .position(|child_index| child_index == before_sibling_index)
+        .unwrap();
+    before_sibling_position
+}
+
 pub fn diff_tree_chawathe<'content>(
     before_content: &'content str,
     after_content: &'content str,
@@ -901,10 +1168,9 @@ pub fn diff_tree_chawathe<'content>(
         .map(|line| FuzzyEvent(Event::parse(line).unwrap()))
         .collect();
 
-    // let mut ops = Vec::new();
-
     // Convert lines into trees
-    let before_tree = Tree::from_indented_items(&before_lines);
+    // JRS: Do we want to save a copy of the before tree without edits...?
+    let mut before_tree = Tree::from_indented_items(&before_lines);
     let after_tree = Tree::from_indented_items(&after_lines);
 
     // Collect tree event labels from function names along each node's tree path
@@ -921,7 +1187,43 @@ pub fn diff_tree_chawathe<'content>(
         &after_labels,
     );
 
-    todo!()
+    let mut edit_ops: Vec<TreeEditOp> = Vec::new();
+
+    // Temporary state used to check child alignment
+    let mut before_in_order: HashSet<TreeNodeIndex> = HashSet::new();
+    let mut after_in_order: HashSet<TreeNodeIndex> = HashSet::new();
+
+    // Visit after nodes in breadth-first order
+    for after_node in after_tree.bfs() {
+        if matching.contains_right(&after_node.index) {
+            let before_node = &before_tree[matching.get_by_right(&after_node.index).unwrap()];
+            let before_item = before_node.data(&before_events);
+            let after_item = after_node.data(&after_events);
+            // Compare events without fuzzy wrapper...
+        } else {
+        }
+        // Re-check matching, as `else` branch above may have updated it
+        let before_node_index = matching.get_by_right(&after_node.index).unwrap();
+        let move_ops = align_children(
+            &mut before_tree,
+            &after_tree,
+            &matching,
+            before_node_index,
+            &after_node.index,
+            &mut before_in_order,
+            &mut after_in_order,
+        );
+        edit_ops.extend(move_ops);
+    }
+
+    // TODO: Convert edit ops to diff ops
+    let mut diff_ops: Vec<TreeDiffOp> = Vec::new();
+
+    TreeDiff {
+        before_lines,
+        after_lines,
+        ops: diff_ops,
+    }
 }
 
 #[cfg(test)]
@@ -1213,15 +1515,14 @@ D
         let tree_2 = Tree::from_indented_items(&items_2);
         let labels_1 = vec![0, 1, 2, 2, 2, 1, 2, 2, 1, 2];
         let labels_2 = vec![0, 1, 2, 2, 1, 2, 1, 2, 2, 2];
-        let matching_bimap =
-            matching_bimap(&tree_1, &tree_2, &items_1, &items_2, &labels_1, &labels_2);
-        assert_eq!(matching_bimap.len(), 9);
-        let mut items_1_matched: Vec<&str> = matching_bimap
+        let matching = matching_bimap(&tree_1, &tree_2, &items_1, &items_2, &labels_1, &labels_2);
+        assert_eq!(matching.len(), 9);
+        let mut items_1_matched: Vec<&str> = matching
             .left_values()
             .map(|index| tree_1[&index].data(&items_1).trim())
             .collect();
         items_1_matched.sort();
-        let mut items_2_matched: Vec<&str> = matching_bimap
+        let mut items_2_matched: Vec<&str> = matching
             .right_values()
             .map(|index| tree_2[&index].data(&items_2).trim())
             .collect();
@@ -1230,6 +1531,70 @@ D
         assert_eq!(
             items_1_matched,
             vec!["D", "P", "P", "P", "Sa", "Sc", "Sd", "Se", "Sf"]
+        );
+    }
+
+    #[test]
+    fn tree_align_children() {
+        let items_1: Vec<_> = "
+1
+  2
+  3
+  4
+  5
+  6"
+        .trim()
+        .lines()
+        .collect();
+        let items_2: Vec<_> = "
+1
+  3
+  5
+  6
+  2
+  4"
+        .trim()
+        .lines()
+        .collect();
+        let mut tree_1 = Tree::from_indented_items(&items_1);
+        let tree_2 = Tree::from_indented_items(&items_2);
+        let labels_1 = vec![0, 1, 1, 1, 1, 1];
+        let labels_2 = vec![0, 1, 1, 1, 1, 1];
+        let matching = matching_bimap(&tree_1, &tree_2, &items_1, &items_2, &labels_1, &labels_2);
+        assert_eq!(matching.len(), 6);
+        let ops = align_children(
+            &mut tree_1,
+            &tree_2,
+            &matching,
+            &TreeNodeIndex::Node(0),
+            &TreeNodeIndex::Node(0),
+            &mut Default::default(),
+            &mut Default::default(),
+        );
+        assert_eq!(
+            ops,
+            vec![
+                TreeEditOp::Move {
+                    before_index: TreeNodeIndex::Node(1),
+                    parent_index: TreeNodeIndex::Node(0),
+                    child_position: 4,
+                },
+                TreeEditOp::Move {
+                    before_index: TreeNodeIndex::Node(3),
+                    parent_index: TreeNodeIndex::Node(0),
+                    child_position: 4,
+                },
+            ]
+        );
+        assert_eq!(
+            tree_1.nodes[0].children,
+            vec![
+                TreeNodeIndex::Node(2),
+                TreeNodeIndex::Node(4),
+                TreeNodeIndex::Node(5),
+                TreeNodeIndex::Node(1),
+                TreeNodeIndex::Node(3),
+            ]
         );
     }
 
