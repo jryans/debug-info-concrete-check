@@ -87,7 +87,9 @@ impl TreeNode {
                     .position(|child_index| child_index == before_index)
                     .unwrap();
                 let child = self.children.remove(current_child_position);
-                self.children.insert(*child_position, child);
+                // Move op child position describes the position before any modification.
+                // For same-parent moves, the `remove` just above means we need to adjust by 1.
+                self.children.insert(*child_position - 1, child);
             }
             _ => unimplemented!(),
         }
@@ -457,6 +459,9 @@ enum TreeEditOp {
         /// New parent node index in before tree
         parent_index: TreeNodeIndex,
         /// Position in new parent node's children
+        /// Note that this is an _insertion_ position into the parent as it currently exists.
+        /// When applying a move within the same parent,
+        /// you would need to decrement this by 1 if you remove before inserting.
         child_position: usize,
     },
 }
@@ -1084,7 +1089,10 @@ fn align_children(
     ops
 }
 
-/// Returns intended 0-based position of node in parent
+/// Returns intended 0-based position of node in parent.
+/// Note that this is an _insertion_ position into the parent as it currently exists.
+/// When applying a move within the same parent,
+/// you would need to decrement this by 1 if you remove before inserting.
 fn find_position_in_parent(
     before_tree: &Tree,
     after_tree: &Tree,
@@ -1139,16 +1147,14 @@ fn find_position_in_parent(
     //     }
     // }
     // JRS: After trying a few examples,
-    // I think the position of the before sibling is what we want
-    // For node moves, the node will be moved to _after_ this sibling
-    // (because moving node has the same parent and is removed first)
-    // TODO: Check this logic for other edit ops
+    // I think the position just after the before sibling is what we want
     let before_sibling_position = before_parent
         .children
         .iter()
         .position(|child_index| child_index == before_sibling_index)
         .unwrap();
-    before_sibling_position
+    // Return position after sibling
+    before_sibling_position + 1
 }
 
 pub fn diff_tree_chawathe<'content>(
@@ -1577,12 +1583,12 @@ D
                 TreeEditOp::Move {
                     before_index: TreeNodeIndex::Node(1),
                     parent_index: TreeNodeIndex::Node(0),
-                    child_position: 4,
+                    child_position: 5,
                 },
                 TreeEditOp::Move {
                     before_index: TreeNodeIndex::Node(3),
                     parent_index: TreeNodeIndex::Node(0),
-                    child_position: 4,
+                    child_position: 5,
                 },
             ]
         );
