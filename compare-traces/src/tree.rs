@@ -153,10 +153,18 @@ impl Tree {
         }
     }
 
-    fn dfs(&self) -> TreeDfs {
-        TreeDfs {
+    fn dfs_pre_order(&self) -> TreeDfsPreOrder {
+        TreeDfsPreOrder {
             tree: &self,
             stack: Vec::from([self.root()]),
+        }
+    }
+
+    fn dfs_post_order(&self) -> TreeDfsPostOrder {
+        TreeDfsPostOrder {
+            tree: &self,
+            stack: Vec::from([self.root()]),
+            visited: HashSet::new(),
         }
     }
 
@@ -263,12 +271,12 @@ impl<'tree> Iterator for TreeBfs<'tree> {
     }
 }
 
-struct TreeDfs<'tree> {
+struct TreeDfsPreOrder<'tree> {
     tree: &'tree Tree,
     stack: Vec<&'tree TreeNode>,
 }
 
-impl<'tree> Iterator for TreeDfs<'tree> {
+impl<'tree> Iterator for TreeDfsPreOrder<'tree> {
     type Item = &'tree TreeNode;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -292,6 +300,50 @@ impl<'tree> Iterator for TreeDfs<'tree> {
                     continue;
                 }
                 return Some(node);
+            }
+        }
+
+        return None;
+    }
+}
+
+struct TreeDfsPostOrder<'tree> {
+    tree: &'tree Tree,
+    stack: Vec<&'tree TreeNode>,
+    visited: HashSet<TreeNodeIndex>,
+}
+
+impl<'tree> Iterator for TreeDfsPostOrder<'tree> {
+    type Item = &'tree TreeNode;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.stack.is_empty() {
+            return None;
+        }
+
+        while !self.stack.is_empty() {
+            // Pop from the end of the stack
+            let node = self.stack.pop().unwrap();
+            if node.is_leaf() {
+                // If `node` is a leaf, stop here for now
+                return Some(node);
+            } else {
+                // If `node` is a branch, first check if we've seen it before
+                if self.visited.contains(&node.index) {
+                    // For all non-root branches, stop here for now
+                    if let TreeNodeIndex::Root = node.index {
+                        continue;
+                    }
+                    return Some(node);
+                } else {
+                    // Mark the branch as visited, then push for visiting after children
+                    self.visited.insert(node.index);
+                    self.stack.push(node);
+                }
+                // Push all children (in reverse for expected ordering)
+                for i in (0..node.children.len()).rev() {
+                    self.stack.push(node.child(&self.tree, i).unwrap());
+                }
             }
         }
 
@@ -820,7 +872,7 @@ where
 
     // Group leaves by label
     let mut before_leaves_by_label: HashMap<u64, Vec<TreeNodeIndex>> = HashMap::new();
-    for leaf in before_tree.dfs().filter(|node| node.is_leaf()) {
+    for leaf in before_tree.dfs_pre_order().filter(|node| node.is_leaf()) {
         let label = leaf.data(before_labels);
         before_leaves_by_label
             .entry(*label)
@@ -828,7 +880,7 @@ where
             .push(leaf.index);
     }
     let mut after_leaves_by_label: HashMap<u64, Vec<TreeNodeIndex>> = HashMap::new();
-    for leaf in after_tree.dfs().filter(|node| node.is_leaf()) {
+    for leaf in after_tree.dfs_pre_order().filter(|node| node.is_leaf()) {
         let label = leaf.data(after_labels);
         after_leaves_by_label
             .entry(*label)
@@ -890,7 +942,7 @@ where
     // Group branches by label
     // Use `IndexMap` with the before side to support iteration in insertion order
     let mut before_branches_by_label: IndexMap<u64, Vec<TreeNodeIndex>> = IndexMap::new();
-    for branch in before_tree.dfs().filter(|node| node.is_branch()) {
+    for branch in before_tree.dfs_pre_order().filter(|node| node.is_branch()) {
         let label = branch.data(before_labels);
         before_branches_by_label
             .entry(*label)
@@ -898,7 +950,7 @@ where
             .push(branch.index);
     }
     let mut after_branches_by_label: HashMap<u64, Vec<TreeNodeIndex>> = HashMap::new();
-    for branch in after_tree.dfs().filter(|node| node.is_branch()) {
+    for branch in after_tree.dfs_pre_order().filter(|node| node.is_branch()) {
         let label = branch.data(after_labels);
         after_branches_by_label
             .entry(*label)
@@ -912,7 +964,7 @@ where
     let mut before_visited: HashSet<TreeNodeIndex> = HashSet::new();
     before_visited.extend(
         before_tree
-            .dfs()
+            .dfs_pre_order()
             .filter(|node| node.is_leaf())
             .map(|node| node.index),
     );
@@ -1335,9 +1387,9 @@ pub fn diff_tree_chawathe<'content>(
         edit_ops.extend(move_ops);
     }
 
-    // Visit before nodes in the depth-first order
+    // Visit before nodes using depth-first, post-order search
     let mut delete_ops: Vec<TreeEditOp> = Vec::new();
-    for before_node in before_tree.dfs() {
+    for before_node in before_tree.dfs_post_order() {
         let before_index = &before_node.index;
         if !matching.contains_left(before_index) {
             // Match not found, need to remove before node
@@ -1422,7 +1474,7 @@ mod tests {
     }
 
     #[test]
-    fn tree_dfs_leaves() {
+    fn tree_dfs_pre_order_leaves() {
         let items: Vec<_> = "
 0
   0.0
@@ -1437,7 +1489,7 @@ mod tests {
             .collect();
         let tree = Tree::from_indented_items(&items);
         let leaves: Vec<&str> = tree
-            .dfs()
+            .dfs_pre_order()
             .filter(|node| node.is_leaf())
             .map(|node| node.data(&items).trim())
             .collect();
@@ -1445,7 +1497,7 @@ mod tests {
     }
 
     #[test]
-    fn tree_dfs_branches() {
+    fn tree_dfs_pre_order_branches() {
         let items: Vec<_> = "
 0
   0.0
@@ -1460,11 +1512,34 @@ mod tests {
             .collect();
         let tree = Tree::from_indented_items(&items);
         let branches: Vec<&str> = tree
-            .dfs()
+            .dfs_pre_order()
             .filter(|node| node.is_branch())
             .map(|node| node.data(&items).trim())
             .collect();
         assert_eq!(branches, vec!["0", "0.0", "1", "1.0"]);
+    }
+
+    #[test]
+    fn tree_dfs_post_order_branches() {
+        let items: Vec<_> = "
+0
+  0.0
+    0.0.0
+  0.1
+  0.2
+1
+  1.0
+    1.0.0"
+            .trim()
+            .lines()
+            .collect();
+        let tree = Tree::from_indented_items(&items);
+        let branches: Vec<&str> = tree
+            .dfs_post_order()
+            .filter(|node| node.is_branch())
+            .map(|node| node.data(&items).trim())
+            .collect();
+        assert_eq!(branches, vec!["0.0", "0", "1.0", "1"]);
     }
 
     #[test]
@@ -1500,12 +1575,12 @@ D
         let tree_1 = Tree::from_indented_items(&items_1);
         let tree_2 = Tree::from_indented_items(&items_2);
         let leaves_1: Vec<TreeNodeIndex> = tree_1
-            .dfs()
+            .dfs_pre_order()
             .filter(|node| node.is_leaf())
             .map(|node| node.index)
             .collect();
         let leaves_2: Vec<TreeNodeIndex> = tree_2
-            .dfs()
+            .dfs_pre_order()
             .filter(|node| node.is_leaf())
             .map(|node| node.index)
             .collect();
@@ -1572,12 +1647,12 @@ CF: system_path at exec-cmd.c:265:6
         let tree_1 = Tree::from_indented_items(&items_1);
         let tree_2 = Tree::from_indented_items(&items_2);
         let leaves_1: Vec<TreeNodeIndex> = tree_1
-            .dfs()
+            .dfs_pre_order()
             .filter(|node| node.is_leaf())
             .map(|node| node.index)
             .collect();
         let leaves_2: Vec<TreeNodeIndex> = tree_2
-            .dfs()
+            .dfs_pre_order()
             .filter(|node| node.is_leaf())
             .map(|node| node.index)
             .collect();
