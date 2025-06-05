@@ -707,6 +707,9 @@ impl PartialEq for FuzzyEvent {
         if self_loc.line.is_some() != other_loc.line.is_some() {
             return false;
         }
+        if self_loc.line.is_none() && other_loc.line.is_none() {
+            return true;
+        }
         let self_line = self_loc.line.unwrap();
         let other_line = other_loc.line.unwrap();
         if self_line.abs_diff(other_line) > 3 {
