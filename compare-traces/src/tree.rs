@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::{Index, IndexMut};
 
@@ -830,8 +830,8 @@ where
             .filter(|index| index.is_some())
             .map(|index| index.unwrap())
             .collect();
-        // Use `BTreeSet` with the after side for efficient removal when a match is found
-        let mut after_leaves_unmatched: BTreeSet<TreeNodeIndex> = leaves_lcs
+        // Use `VecDeque` with the after side for efficient removal when a match is found
+        let mut after_leaves_unmatched: VecDeque<TreeNodeIndex> = leaves_lcs
             .unmatched
             .iter()
             .map(|index_pair| index_pair.1)
@@ -839,18 +839,18 @@ where
             .map(|index| index.unwrap())
             .collect();
         for before_leaf_index in &before_leaves_unmatched {
-            let mut to_remove: Option<TreeNodeIndex> = None;
-            for after_leaf_index in &after_leaves_unmatched {
+            let mut to_remove: Option<usize> = None;
+            for (position, after_leaf_index) in after_leaves_unmatched.iter().enumerate() {
                 let before_leaf_item = before_tree[before_leaf_index].data(&before_items);
                 let after_leaf_item = after_tree[after_leaf_index].data(&after_items);
                 if before_leaf_item == after_leaf_item {
                     matching.insert(*before_leaf_index, *after_leaf_index);
-                    to_remove = Some(*after_leaf_index);
+                    to_remove = Some(position);
                     break;
                 }
             }
-            if let Some(index) = to_remove {
-                after_leaves_unmatched.remove(&index);
+            if let Some(position) = to_remove {
+                after_leaves_unmatched.remove(position);
             }
         }
     }
@@ -902,12 +902,12 @@ where
         // Match any remaining branches to their first trace-order match
         let before_branches_unmatched: Vec<TreeNodeIndex> =
             before_branches.iter().cloned().collect();
-        // Use `BTreeSet` with the after side for efficient removal when a match is found
-        let mut after_branches_unmatched: BTreeSet<TreeNodeIndex> =
+        // Use `VecDeque` with the after side for efficient removal when a match is found
+        let mut after_branches_unmatched: VecDeque<TreeNodeIndex> =
             after_branches.iter().cloned().collect();
         for before_branch_index in &before_branches_unmatched {
-            let mut to_remove: Option<TreeNodeIndex> = None;
-            for after_branch_index in &after_branches_unmatched {
+            let mut to_remove: Option<usize> = None;
+            for (position, after_branch_index) in after_branches_unmatched.iter().enumerate() {
                 let before_branch = &before_tree[before_branch_index];
                 let after_branch = &after_tree[after_branch_index];
                 let before_branch_item = before_branch.data(&before_items);
@@ -928,13 +928,13 @@ where
                     let common_ratio: f64 = common_children / max_children;
                     if common_ratio >= 0.5 {
                         matching.insert(*before_branch_index, *after_branch_index);
-                        to_remove = Some(*after_branch_index);
+                        to_remove = Some(position);
                         break;
                     }
                 }
             }
-            if let Some(index) = to_remove {
-                after_branches_unmatched.remove(&index);
+            if let Some(position) = to_remove {
+                after_branches_unmatched.remove(position);
             }
         }
 
