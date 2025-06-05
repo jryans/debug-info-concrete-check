@@ -71,28 +71,10 @@ impl TreeNode {
         }
     }
 
-    // JRS: Maybe move this to the tree...?
-    fn edit(&mut self, edit: &TreeEditOp) {
-        match edit {
-            TreeEditOp::Move {
-                before_index,
-                parent_index,
-                child_position,
-            } => {
-                // We expect move edits to be passed to the current parent
-                // Changing parents is not expected with our tree semantics
-                assert!(self.index == *parent_index);
-                let current_child_position = self
-                    .children
-                    .iter()
-                    .position(|child_index| child_index == before_index)
-                    .unwrap();
-                let child = self.children.remove(current_child_position);
-                // Move op child position describes the position before any modification.
-                // For same-parent moves, the `remove` just above means we need to adjust by 1.
-                self.children.insert(*child_position - 1, child);
-            }
-            _ => unimplemented!(),
+    fn data_mut<'container, T>(&self, container: &'container mut [T]) -> &'container mut T {
+        match self.index {
+            TreeNodeIndex::Node(i) => &mut container[i],
+            TreeNodeIndex::Root => unimplemented!(),
         }
     }
 }
@@ -175,6 +157,52 @@ impl Tree {
         TreeDfs {
             tree: &self,
             stack: Vec::from([self.root()]),
+        }
+    }
+
+    // JRS: Consider implementing all edits here,
+    // if we can navigate the lifetime rules to do so...
+    fn edit(&mut self, edit: &TreeEditOp) {
+        match edit {
+            TreeEditOp::Remove { before_index } => {
+                let parent_index = self[before_index].parent.unwrap();
+                let parent = &mut self[&parent_index];
+                let child_position = parent
+                    .children
+                    .iter()
+                    .position(|child_index| child_index == before_index)
+                    .unwrap();
+                parent.children.remove(child_position);
+            }
+            TreeEditOp::Move {
+                before_index,
+                parent_index,
+                child_position,
+            } => {
+                let current_parent_index = self[before_index].parent.unwrap();
+                // Changing parents is not expected with our tree semantics,
+                // but it may of course happen in general tree diffing.
+                // We support it here to allow testing the algorithm's examples.
+                let same_parent = current_parent_index == *parent_index;
+                let child = {
+                    let current_parent = &mut self[&current_parent_index];
+                    let current_child_position = current_parent
+                        .children
+                        .iter()
+                        .position(|child_index| child_index == before_index)
+                        .unwrap();
+                    current_parent.children.remove(current_child_position)
+                };
+                let target_parent = &mut self[parent_index];
+                let mut new_child_position = *child_position;
+                // Move op child position describes the position before any modification.
+                // For same-parent moves, the `remove` just above means we need to adjust by 1.
+                if same_parent {
+                    new_child_position -= 1;
+                }
+                target_parent.children.insert(new_child_position, child);
+            }
+            _ => unimplemented!(),
         }
     }
 }
@@ -496,7 +524,8 @@ pub enum TreeDiffOp {
 pub struct TreeDiff<'content> {
     before_lines: Vec<&'content str>,
     after_lines: Vec<&'content str>,
-    ops: Vec<TreeDiffOp>,
+    edit_ops: Vec<TreeEditOp>,
+    diff_ops: Vec<TreeDiffOp>,
 }
 
 fn compare_frames(
@@ -682,11 +711,13 @@ pub fn diff_tree<'content>(
     TreeDiff {
         before_lines,
         after_lines,
-        ops,
+        edit_ops: Default::default(),
+        diff_ops: ops,
     }
 }
 
 /// Override `Event` equality to allow for some source coordinate drift
+#[derive(Clone)]
 struct FuzzyEvent(Event);
 
 impl PartialEq for FuzzyEvent {
@@ -1083,8 +1114,8 @@ fn align_children(
             parent_index: *before_parent_index,
             child_position,
         };
-        // Apply move to before tree (via parent) and add to ops
-        before_tree[before_parent_index].edit(&op);
+        // Apply move to before tree and add to ops
+        before_tree.edit(&op);
         ops.push(op);
         // Mark children as in order
         before_in_order.insert(*before_child_index);
@@ -1162,6 +1193,7 @@ fn find_position_in_parent(
     before_sibling_position + 1
 }
 
+// TODO: Separate diff algorithm from tree events to simplify testing and reuse
 pub fn diff_tree_chawathe<'content>(
     before_content: &'content str,
     after_content: &'content str,
@@ -1170,7 +1202,7 @@ pub fn diff_tree_chawathe<'content>(
     let after_lines: Vec<_> = after_content.lines().collect();
 
     // Parse lines into fuzzy events
-    let before_events: Vec<_> = before_lines
+    let mut before_events: Vec<_> = before_lines
         .iter()
         .map(|line| FuzzyEvent(Event::parse(line).unwrap()))
         .collect();
@@ -1185,11 +1217,11 @@ pub fn diff_tree_chawathe<'content>(
     let after_tree = Tree::from_indented_items(&after_lines);
 
     // Collect tree event labels from function names along each node's tree path
-    let before_labels = tree_event_labels(&before_tree, &before_events);
+    let mut before_labels = tree_event_labels(&before_tree, &before_events);
     let after_labels = tree_event_labels(&after_tree, &after_events);
 
     // Build initial matching bimap
-    let matching = matching_bimap(
+    let mut matching = matching_bimap(
         &before_tree,
         &after_tree,
         &before_events,
@@ -1206,26 +1238,124 @@ pub fn diff_tree_chawathe<'content>(
 
     // Visit after nodes in breadth-first order
     for after_node in after_tree.bfs() {
-        if matching.contains_right(&after_node.index) {
-            let before_node = &before_tree[matching.get_by_right(&after_node.index).unwrap()];
-            let before_item = before_node.data(&before_events);
-            let after_item = after_node.data(&after_events);
-            // Compare events without fuzzy wrapper...
+        let after_index = &after_node.index;
+        if matching.contains_right(after_index) {
+            // Match exists, check if replacements or moves are needed
+            let before_index = matching.get_by_right(after_index).unwrap();
+            let before_node = &before_tree[before_index];
+            // Compare events without fuzzy wrapper
+            let before_event = before_node.data(&before_events);
+            let after_event = after_node.data(&after_events);
+            if before_event.as_event() != after_event.as_event() {
+                let op = TreeEditOp::Replace {
+                    before_index: *before_index,
+                    after_index: *after_index,
+                };
+                // Replace event in before tree
+                *before_node.data_mut(&mut before_events) = after_event.clone();
+                // Add to ops
+                edit_ops.push(op);
+            }
+            // Transcribing algorithm's naming in something a bit more readable
+            // x: after_node
+            // y: after_parent (from `after_node` parent)
+            // z: target_before_parent (from matching `after_parent`)
+            // w: before_node (from matching `after_node`)
+            // v: current_before_parent (from `before_node` parent)
+            let after_parent_index = &after_node.parent(&after_tree).unwrap().index;
+            let current_before_parent_index = &before_node.parent(&before_tree).unwrap().index;
+            if let Some(target_before_parent_index) = matching.get_by_right(after_parent_index) {
+                if current_before_parent_index != target_before_parent_index {
+                    // Parent match not found, move node to target parent
+                    // JRS: We don't expect parent changes with our tree semantics,
+                    // though they do of course appear for general tree diffs.
+                    // Perhaps optionally disable this ability for our trees...?
+                    let child_position = find_position_in_parent(
+                        &before_tree,
+                        &after_tree,
+                        &matching,
+                        after_index,
+                        &mut before_in_order,
+                        &mut after_in_order,
+                    );
+                    let op = TreeEditOp::Move {
+                        before_index: *before_index,
+                        parent_index: *target_before_parent_index,
+                        child_position,
+                    };
+                    // Apply move to before tree and add to ops
+                    before_tree.edit(&op);
+                    edit_ops.push(op);
+                }
+            }
         } else {
+            // Match not found, need to add after node
+            let child_position = find_position_in_parent(
+                &before_tree,
+                &after_tree,
+                &matching,
+                after_index,
+                &mut before_in_order,
+                &mut after_in_order,
+            );
+            let after_parent_index = &after_node.parent(&after_tree).unwrap().index;
+            let before_parent_index = matching.get_by_right(after_parent_index).unwrap();
+            let op = TreeEditOp::Add {
+                after_index: *after_index,
+                parent_index: *before_parent_index,
+                child_position,
+            };
+            // Add to the before tree
+            let before_tree_position = before_events.len();
+            before_events.push(after_node.data(&after_events).clone());
+            // JRS: This might not be correct...
+            before_labels.push(after_node.data(&after_labels).clone());
+            let before_node = TreeNode::new(before_tree_position, *before_parent_index);
+            let before_index = before_tree.register(before_node);
+            let before_parent = &mut before_tree[before_parent_index];
+            before_parent.children.insert(child_position, before_index);
+            // Add to matching
+            matching.insert(before_index, *after_index);
+            // Add to ops
+            edit_ops.push(op);
         }
         // Re-check matching, as `else` branch above may have updated it
-        let before_node_index = matching.get_by_right(&after_node.index).unwrap();
+        let before_index = matching.get_by_right(after_index).unwrap();
+        // Align children
         let move_ops = align_children(
             &mut before_tree,
             &after_tree,
             &matching,
-            before_node_index,
-            &after_node.index,
+            before_index,
+            after_index,
             &mut before_in_order,
             &mut after_in_order,
         );
+        // Merge moves into ops
         edit_ops.extend(move_ops);
     }
+
+    // Visit before nodes in the depth-first order
+    let mut delete_ops: Vec<TreeEditOp> = Vec::new();
+    for before_node in before_tree.dfs() {
+        let before_index = &before_node.index;
+        if !matching.contains_left(before_index) {
+            // Match not found, need to remove before node
+            let op = TreeEditOp::Remove {
+                before_index: *before_index,
+            };
+            // Add to temporary delete ops
+            delete_ops.push(op);
+        }
+    }
+    // Now that we're done iterating the before tree,
+    // apply any delete ops found
+    for op in &delete_ops {
+        // Remove from the before tree
+        before_tree.edit(&op);
+    }
+    // Merge deletes into ops
+    edit_ops.extend(delete_ops);
 
     // TODO: Convert edit ops to diff ops
     let mut diff_ops: Vec<TreeDiffOp> = Vec::new();
@@ -1233,7 +1363,8 @@ pub fn diff_tree_chawathe<'content>(
     TreeDiff {
         before_lines,
         after_lines,
-        ops: diff_ops,
+        edit_ops,
+        diff_ops,
     }
 }
 
@@ -1610,6 +1741,53 @@ D
     }
 
     #[test]
+    fn tree_diff_chawathe() {
+        let before_content = "
+CF: D at file.tex
+  CF: P at file.tex
+    CF: Sa at file.tex
+    CF: Sb at file.tex
+    CF: Sc at file.tex
+  CF: P at file.tex
+    CF: Sd at file.tex
+    CF: Se at file.tex
+  CF: P at file.tex
+    CF: Sf at file.tex"
+            .trim();
+        let after_content = "
+CF: D at file.tex
+  CF: P at file.tex
+    CF: Sa at file.tex
+    CF: Sc at file.tex
+  CF: P at file.tex
+    CF: Sf at file.tex
+  CF: P at file.tex
+    CF: Sd at file.tex
+    CF: Se at file.tex
+    CF: Sg at file.tex"
+            .trim();
+        let diff = diff_tree_chawathe(before_content, after_content);
+        assert_eq!(
+            diff.edit_ops,
+            vec![
+                TreeEditOp::Move {
+                    before_index: TreeNodeIndex::Node(8),
+                    parent_index: TreeNodeIndex::Node(0),
+                    child_position: 1,
+                },
+                TreeEditOp::Add {
+                    after_index: TreeNodeIndex::Node(9),
+                    parent_index: TreeNodeIndex::Node(5),
+                    child_position: 2,
+                },
+                TreeEditOp::Remove {
+                    before_index: TreeNodeIndex::Node(3),
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn remove_follows_tree_semantics() {
         // Adapted from case where text diffing fails
         // with Git's `t1007-hash-object` test
@@ -1632,10 +1810,9 @@ CF: all_attrs_init at attr.c:155:3
             .trim();
 
         let diff = diff_tree(before_content, after_content);
-        println!("{:?}", &diff);
 
-        assert!(diff.ops.len() > 0);
-        let diff_op = diff.ops.last().unwrap();
+        assert!(diff.diff_ops.len() > 0);
+        let diff_op = diff.diff_ops.last().unwrap();
         if let TreeDiffOp::Remove { before_index } = diff_op {
             assert!(*before_index == 3);
         } else {
@@ -1677,10 +1854,9 @@ CF: system_path at exec-cmd.c:268:27
             .trim();
 
         let diff = diff_tree(before_content, after_content);
-        println!("{:?}", &diff);
 
-        assert!(diff.ops.len() > 0);
-        let diff_op = diff.ops.last().unwrap();
+        assert!(diff.diff_ops.len() > 0);
+        let diff_op = diff.diff_ops.last().unwrap();
         if let TreeDiffOp::Remove { before_index } = diff_op {
             assert!(*before_index == 5);
         } else {
