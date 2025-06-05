@@ -1867,8 +1867,7 @@ CF: D at file.tex
         // Adapted from case where text diffing fails
         // with Git's `t1007-hash-object` test
         // (removes lines 2 - 4, which does not make sense according to tree semantics)
-        // TODO: Fix our algorithm to get this working
-        // (currently removes lines 1, 5, 6, the opposite of text diffing)
+        // Chawathe et al. tree algorithm removes lines 1 - 3, following tree semantics
 
         let before_content = "
 CF: all_attrs_init at attr.c:155:3
@@ -1884,7 +1883,21 @@ CF: all_attrs_init at attr.c:155:3
   RF: hashmap_iter_next at hashmap.c:308:1"
             .trim();
 
-        let diff = diff_tree(before_content, after_content);
+        let diff = diff_tree_chawathe(before_content, after_content);
+        assert_eq!(
+            diff.edit_ops,
+            vec![
+                TreeEditOp::Remove {
+                    before_index: TreeNodeIndex::Node(1),
+                },
+                TreeEditOp::Remove {
+                    before_index: TreeNodeIndex::Node(2),
+                },
+                TreeEditOp::Remove {
+                    before_index: TreeNodeIndex::Node(0),
+                },
+            ]
+        );
 
         assert!(diff.diff_ops.len() > 0);
         let diff_op = diff.diff_ops.last().unwrap();
@@ -1899,8 +1912,7 @@ CF: all_attrs_init at attr.c:155:3
     fn remove_nested_tree() {
         // Adapted from Git's `log` trace
         // Nested call to `git_has_dos_drive_prefix` removed
-        // TODO: Fix our algorithm to get this working
-        // (currently replaces line 5 instead of removing)
+        // Chawathe et al. tree algorithm removes lines 6 - 8, following tree semantics
 
         let before_content = "
 CF: system_path at exec-cmd.c:265:6
@@ -1928,7 +1940,21 @@ CF: system_path at exec-cmd.c:268:27
   RF: system_prefix at exec-cmd.c:248:2"
             .trim();
 
-        let diff = diff_tree(before_content, after_content);
+        let diff = diff_tree_chawathe(before_content, after_content);
+        assert_eq!(
+            diff.edit_ops,
+            vec![
+                TreeEditOp::Remove {
+                    before_index: TreeNodeIndex::Node(6),
+                },
+                TreeEditOp::Remove {
+                    before_index: TreeNodeIndex::Node(7),
+                },
+                TreeEditOp::Remove {
+                    before_index: TreeNodeIndex::Node(5),
+                },
+            ]
+        );
 
         assert!(diff.diff_ops.len() > 0);
         let diff_op = diff.diff_ops.last().unwrap();
