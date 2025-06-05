@@ -1,8 +1,9 @@
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::{Index, IndexMut};
 
 use bimap::BiHashMap;
+use indexmap::IndexMap;
 use similar::{capture_diff_slices, DiffOp, TextDiff};
 
 use crate::event::{line_depth, Event, Eventable};
@@ -856,7 +857,8 @@ where
     }
 
     // Group branches by label
-    let mut before_branches_by_label: BTreeMap<u64, Vec<TreeNodeIndex>> = BTreeMap::new();
+    // Use `IndexMap` with the before side to support iteration in insertion order
+    let mut before_branches_by_label: IndexMap<u64, Vec<TreeNodeIndex>> = IndexMap::new();
     for branch in before_tree.dfs().filter(|node| node.is_branch()) {
         let label = branch.data(before_labels);
         before_branches_by_label
