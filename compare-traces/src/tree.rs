@@ -1112,7 +1112,10 @@ fn find_position_in_parent(
         after_sibling_index = Some(*after_index_to_check);
         break;
     }
-    assert!(after_sibling_index.is_some());
+    // If there aren't any in-order siblings to the left, assume we should use first position
+    if after_sibling_index.is_none() {
+        return 0;
+    }
     // Find position of its matched before node, counting _in-order_ siblings only
     let before_sibling_index = matching
         .get_by_right(&after_sibling_index.unwrap())
