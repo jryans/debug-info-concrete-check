@@ -163,8 +163,9 @@ impl Tree {
                 assert!(stack_top.children.len() > 0);
                 stack.push(stack_top.last_child(&tree).unwrap().index);
             } else if item_depth < stack_depth {
-                assert!(item_depth == stack_depth - 1);
-                stack.pop();
+                for _ in 0..(stack_depth - item_depth) {
+                    stack.pop();
+                }
             }
             // TODO: Move this into `push_child` on `TreeNode` somehow
             let stack_top_index = tree[stack.last().unwrap()].index;
