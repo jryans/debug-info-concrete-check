@@ -16,6 +16,15 @@ enum TreeNodeIndex {
     Node(usize),
 }
 
+impl TreeNodeIndex {
+    fn unwrap(self) -> usize {
+        match self {
+            TreeNodeIndex::Node(i) => i,
+            TreeNodeIndex::Root => panic!("Called `TreeNodeIndex::unwrap` on `Root`"),
+        }
+    }
+}
+
 #[derive(PartialEq, Eq, Debug)]
 struct TreeNode {
     index: TreeNodeIndex,
@@ -75,6 +84,28 @@ impl TreeNode {
         match self.index {
             TreeNodeIndex::Node(i) => &mut container[i],
             TreeNodeIndex::Root => unimplemented!(),
+        }
+    }
+
+    fn bfs<'tree>(&'tree self, tree: &'tree Tree) -> TreeBfs {
+        TreeBfs {
+            tree,
+            queue: VecDeque::from([self]),
+        }
+    }
+
+    fn dfs_pre_order<'tree>(&'tree self, tree: &'tree Tree) -> TreeDfsPreOrder {
+        TreeDfsPreOrder {
+            tree,
+            stack: Vec::from([self]),
+        }
+    }
+
+    fn dfs_post_order<'tree>(&'tree self, tree: &'tree Tree) -> TreeDfsPostOrder {
+        TreeDfsPostOrder {
+            tree,
+            stack: Vec::from([self]),
+            visited: HashSet::new(),
         }
     }
 }
@@ -186,6 +217,7 @@ impl Tree {
                 before_index,
                 parent_index,
                 child_position,
+                ..
             } => {
                 let current_parent_index = self[before_index].parent.unwrap();
                 // Changing parents is not expected with our tree semantics,
@@ -513,16 +545,17 @@ where
     tree_indexable_subset_lcs(&subset_a_bundled_items, &subset_b_bundled_items)
 }
 
-// Tree edits that transform the before tree into the after tree
+/// Tree edits that transform the before tree into the after tree.
+/// Indices are 0-based.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 enum TreeEditOp {
     Add {
-        /// Node index in after tree
-        after_index: TreeNodeIndex,
         /// New parent node index in before tree
         parent_index: TreeNodeIndex,
         /// Position in new parent node's children
         child_position: usize,
+        /// Node index in after tree
+        after_index: TreeNodeIndex,
     },
     Remove {
         /// Node index in before tree
@@ -544,32 +577,82 @@ enum TreeEditOp {
         /// When applying a move within the same parent,
         /// you would need to decrement this by 1 if you remove before inserting.
         child_position: usize,
+        /// Node index in after tree
+        after_index: TreeNodeIndex,
     },
 }
 
-// Diff result in terms of lines
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
-pub enum TreeDiffOp {
-    Add {
-        /// Index of added line in after content
-        after_index: usize,
-    },
-    Remove {
-        /// Index of removed line in before content
-        before_index: usize,
-    },
-    Replace {
-        /// Index of replaced line in before content
-        before_index: usize,
-        /// Index of replaced line in after content
-        after_index: usize,
-    },
-    Move {
-        /// Index of reordered line in before content
-        before_index: usize,
-        /// Index of reordered line in after content
-        after_index: usize,
-    },
+impl TreeEditOp {
+    fn to_diff_ops(&self, before_tree: &Tree) -> Vec<DiffOp> {
+        match self {
+            TreeEditOp::Add {
+                parent_index,
+                child_position,
+                after_index,
+            } => vec![DiffOp::Insert {
+                old_index: {
+                    // let mut index = parent_index.unwrap();
+                    // let before_parent = &before_tree[parent_index];
+                    // // JRS: Child position was only accurate at the time of the edit...
+                    // index + 1
+                    // JRS: Not sure if we actually use this...?
+                    // Let's force this to 0 for now...
+                    0
+                },
+                // JRS: Maybe we can't use after index at all, and instead
+                // we need to count in the before tree...?
+                // Keep in mind the before tree hsa now been edited to match after...
+                new_index: after_index.unwrap(),
+                new_len: 1,
+            }],
+            TreeEditOp::Remove { before_index } => vec![DiffOp::Delete {
+                old_index: before_index.unwrap(),
+                old_len: 1,
+                new_index: {
+                    // JRS: Not sure if we actually use this...?
+                    // Let's force this to 0 for now...
+                    0
+                },
+            }],
+            TreeEditOp::Replace {
+                before_index,
+                after_index,
+            } => vec![DiffOp::Replace {
+                old_index: before_index.unwrap(),
+                old_len: 1,
+                new_index: after_index.unwrap(),
+                new_len: 1,
+            }],
+            TreeEditOp::Move {
+                before_index,
+                after_index,
+                ..
+            } => {
+                let node = &before_tree[before_index];
+                let subtree_len = node.dfs_pre_order(before_tree).count();
+                vec![
+                    DiffOp::Delete {
+                        old_index: before_index.unwrap(),
+                        old_len: subtree_len,
+                        new_index: {
+                            // JRS: Not sure if we actually use this...?
+                            // Let's force this to 0 for now...
+                            0
+                        },
+                    },
+                    DiffOp::Insert {
+                        old_index: {
+                            // JRS: Not sure if we actually use this...?
+                            // Let's force this to 0 for now...
+                            0
+                        },
+                        new_index: after_index.unwrap(),
+                        new_len: subtree_len,
+                    },
+                ]
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -577,7 +660,7 @@ pub struct TreeDiff<'content> {
     before_lines: Vec<&'content str>,
     after_lines: Vec<&'content str>,
     edit_ops: Vec<TreeEditOp>,
-    diff_ops: Vec<TreeDiffOp>,
+    diff_ops: Vec<DiffOp>,
 }
 
 /// Override `Event` equality to allow for some source coordinate drift
@@ -977,6 +1060,7 @@ fn align_children(
             before_index: *before_child_index,
             parent_index: *before_parent_index,
             child_position,
+            after_index: *after_child_index,
         };
         // Apply move to before tree and add to ops
         before_tree.edit(&op);
@@ -1147,6 +1231,7 @@ pub fn diff_tree<'content>(
                         before_index: *before_index,
                         parent_index: *target_before_parent_index,
                         child_position,
+                        after_index: *after_index,
                     };
                     // Apply move to before tree and add to ops
                     before_tree.edit(&op);
@@ -1166,9 +1251,9 @@ pub fn diff_tree<'content>(
             let after_parent_index = &after_node.parent(&after_tree).unwrap().index;
             let before_parent_index = matching.get_by_right(after_parent_index).unwrap();
             let op = TreeEditOp::Add {
-                after_index: *after_index,
                 parent_index: *before_parent_index,
                 child_position,
+                after_index: *after_index,
             };
             // Add to the before tree
             let before_tree_position = before_events.len();
@@ -1222,8 +1307,12 @@ pub fn diff_tree<'content>(
     // Merge deletes into ops
     edit_ops.extend(delete_ops);
 
-    // TODO: Convert edit ops to diff ops
-    let mut diff_ops: Vec<TreeDiffOp> = Vec::new();
+    // Convert edit ops to diff ops
+    // TODO: Sort and compact these into blocks instead of individual lines
+    let diff_ops: Vec<DiffOp> = edit_ops
+        .iter()
+        .flat_map(|edit_op| edit_op.to_diff_ops(&before_tree))
+        .collect();
 
     TreeDiff {
         before_lines,
@@ -1608,11 +1697,13 @@ D
                     before_index: TreeNodeIndex::Node(1),
                     parent_index: TreeNodeIndex::Node(0),
                     child_position: 5,
+                    after_index: TreeNodeIndex::Node(4),
                 },
                 TreeEditOp::Move {
                     before_index: TreeNodeIndex::Node(3),
                     parent_index: TreeNodeIndex::Node(0),
                     child_position: 5,
+                    after_index: TreeNodeIndex::Node(5),
                 },
             ]
         );
@@ -1662,14 +1753,40 @@ CF: D at file.tex
                     before_index: TreeNodeIndex::Node(8),
                     parent_index: TreeNodeIndex::Node(0),
                     child_position: 1,
+                    after_index: TreeNodeIndex::Node(4),
                 },
                 TreeEditOp::Add {
-                    after_index: TreeNodeIndex::Node(9),
                     parent_index: TreeNodeIndex::Node(5),
                     child_position: 2,
+                    after_index: TreeNodeIndex::Node(9),
                 },
                 TreeEditOp::Remove {
                     before_index: TreeNodeIndex::Node(3),
+                },
+            ]
+        );
+        assert_eq!(
+            diff.diff_ops,
+            vec![
+                DiffOp::Delete {
+                    old_index: 8,
+                    old_len: 2,
+                    new_index: 0,
+                },
+                DiffOp::Insert {
+                    old_index: 0,
+                    new_index: 4,
+                    new_len: 2,
+                },
+                DiffOp::Insert {
+                    old_index: 0,
+                    new_index: 9,
+                    new_len: 1,
+                },
+                DiffOp::Delete {
+                    old_index: 3,
+                    old_len: 1,
+                    new_index: 0,
                 },
             ]
         );
@@ -1681,7 +1798,6 @@ CF: D at file.tex
         // with Git's `t1007-hash-object` test
         // (removes lines 2 - 4, which does not make sense according to tree semantics)
         // Chawathe et al. tree algorithm removes lines 1 - 3, following tree semantics
-
         let before_content = "
 CF: all_attrs_init at attr.c:155:3
   CT: container_of_or_null_offset at git-compat-util.h:1580:0
@@ -1695,7 +1811,6 @@ CF: all_attrs_init at attr.c:155:3
   CT: hashmap_iter_next at hashmap.c:295:0
   RF: hashmap_iter_next at hashmap.c:308:1"
             .trim();
-
         let diff = diff_tree(before_content, after_content);
         assert_eq!(
             diff.edit_ops,
@@ -1711,14 +1826,26 @@ CF: all_attrs_init at attr.c:155:3
                 },
             ]
         );
-
-        assert!(diff.diff_ops.len() > 0);
-        let diff_op = diff.diff_ops.last().unwrap();
-        if let TreeDiffOp::Remove { before_index } = diff_op {
-            assert!(*before_index == 3);
-        } else {
-            assert!(false);
-        }
+        assert_eq!(
+            diff.diff_ops,
+            vec![
+                DiffOp::Delete {
+                    old_index: 1,
+                    old_len: 1,
+                    new_index: 0,
+                },
+                DiffOp::Delete {
+                    old_index: 2,
+                    old_len: 1,
+                    new_index: 0,
+                },
+                DiffOp::Delete {
+                    old_index: 0,
+                    old_len: 1,
+                    new_index: 0,
+                },
+            ]
+        );
     }
 
     #[test]
@@ -1726,7 +1853,6 @@ CF: all_attrs_init at attr.c:155:3
         // Adapted from Git's `log` trace
         // Nested call to `git_has_dos_drive_prefix` removed
         // Chawathe et al. tree algorithm removes lines 6 - 8, following tree semantics
-
         let before_content = "
 CF: system_path at exec-cmd.c:265:6
   CT: is_absolute_path at cache.h:1275:0
@@ -1752,7 +1878,6 @@ CF: system_path at exec-cmd.c:268:27
   CT: system_prefix at exec-cmd.c:247:0
   RF: system_prefix at exec-cmd.c:248:2"
             .trim();
-
         let diff = diff_tree(before_content, after_content);
         assert_eq!(
             diff.edit_ops,
@@ -1768,13 +1893,25 @@ CF: system_path at exec-cmd.c:268:27
                 },
             ]
         );
-
-        assert!(diff.diff_ops.len() > 0);
-        let diff_op = diff.diff_ops.last().unwrap();
-        if let TreeDiffOp::Remove { before_index } = diff_op {
-            assert!(*before_index == 5);
-        } else {
-            assert!(false);
-        }
+        assert_eq!(
+            diff.diff_ops,
+            vec![
+                DiffOp::Delete {
+                    old_index: 6,
+                    old_len: 1,
+                    new_index: 0,
+                },
+                DiffOp::Delete {
+                    old_index: 7,
+                    old_len: 1,
+                    new_index: 0,
+                },
+                DiffOp::Delete {
+                    old_index: 5,
+                    old_len: 1,
+                    new_index: 0,
+                },
+            ]
+        );
     }
 }
