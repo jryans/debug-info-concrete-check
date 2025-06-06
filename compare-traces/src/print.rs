@@ -1,5 +1,7 @@
 use console::Style;
-use similar::{ChangeTag, DiffOp, DiffTag, TextDiff};
+use similar::{ChangeTag, DiffOp, DiffTag};
+
+use crate::diff::Diff;
 
 pub fn print_change(op: &DiffOp, change_tuples: &[(ChangeTag, &[&str])]) {
     if op.tag() == DiffTag::Replace {
@@ -38,16 +40,16 @@ pub fn print_change_vec(op: &DiffOp, change_tuples: &[(ChangeTag, Vec<&str>)]) {
     print_change(op, change_tuples_slices.as_slice());
 }
 
-pub fn print_change_group(diff: &TextDiff<'_, '_, '_, str>, op_group: &Vec<DiffOp>) {
+pub fn print_change_group(diff: &Diff<'_>, op_group: &Vec<DiffOp>) {
     for op in op_group {
         let change_tuples: Vec<_> = op
-            .iter_slices(diff.old_slices(), diff.new_slices())
+            .iter_slices(&diff.before_lines, &diff.after_lines)
             .collect();
         print_change(&op, &change_tuples);
     }
 }
 
-pub fn print_diff(diff: &TextDiff<'_, '_, '_, str>) {
+pub fn print_diff(diff: &Diff<'_>) {
     // TODO: Add `context` option to reveal surrounding lines when desired
     for op_group in diff.grouped_ops(0) {
         print_change_group(&diff, &op_group);

@@ -11,7 +11,7 @@ use crate::event::{line_depth, Event, Eventable};
 /// A separate `Root` value is reserved for the root node.
 /// This allows node indices to remain in sync with those for the separate data array.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
-enum TreeNodeIndex {
+pub enum TreeNodeIndex {
     Root,
     Node(usize),
 }
@@ -548,7 +548,7 @@ where
 /// Tree edits that transform the before tree into the after tree.
 /// Indices are 0-based.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
-enum TreeEditOp {
+pub enum TreeEditOp {
     Add {
         /// New parent node index in before tree
         parent_index: TreeNodeIndex,
@@ -657,10 +657,10 @@ impl TreeEditOp {
 
 #[derive(Debug)]
 pub struct TreeDiff<'content> {
-    before_lines: Vec<&'content str>,
-    after_lines: Vec<&'content str>,
-    edit_ops: Vec<TreeEditOp>,
-    diff_ops: Vec<DiffOp>,
+    pub before_lines: Vec<&'content str>,
+    pub after_lines: Vec<&'content str>,
+    pub edit_ops: Vec<TreeEditOp>,
+    pub diff_ops: Vec<DiffOp>,
 }
 
 /// Override `Event` equality to allow for some source coordinate drift

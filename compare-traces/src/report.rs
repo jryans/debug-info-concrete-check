@@ -11,9 +11,10 @@ use enum_iterator::Sequence;
 use log::log_enabled;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use similar::{ChangeTag, DiffOp, DiffTag, TextDiff};
+use similar::{ChangeTag, DiffOp, DiffTag};
 
 use crate::{
+    diff::Diff,
     event::{Event, EventType, Location},
     print::{print_change_group, print_change_vec},
     remarks::Remark,
@@ -786,7 +787,7 @@ fn print_events(events: &Vec<Event>) {
 }
 
 pub fn analyse_and_print_report(
-    diff: &TextDiff<'_, '_, '_, str>,
+    diff: &Diff<'_>,
     remarks_by_location: &Option<HashMap<Location, Remark>>,
     tweak_event_alignment: bool,
 ) -> BTreeMap<Divergence, u64> {
@@ -808,7 +809,7 @@ pub fn analyse_and_print_report(
         for op in op_group {
             // TODO: Skip unnecessary collects / copies
             let mut change_tuples_strings: Vec<_> = op
-                .iter_slices(diff.old_slices(), diff.new_slices())
+                .iter_slices(&diff.before_lines, &diff.after_lines)
                 .map(|(tag, slices)| (tag, Vec::from(slices)))
                 .collect();
 

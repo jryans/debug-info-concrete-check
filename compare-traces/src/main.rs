@@ -4,7 +4,9 @@ use std::{fs, path::PathBuf};
 
 use anyhow::{anyhow, Context, Ok, Result};
 use clap::{Parser, ValueEnum};
+use diff::Diff;
 use similar::TextDiff;
+use tree::diff_tree;
 
 use crate::{
     event::Location,
@@ -13,6 +15,7 @@ use crate::{
     report::{analyse_and_print_report, print_before_events_by_type},
 };
 
+mod diff;
 mod event;
 mod print;
 mod remarks;
@@ -92,10 +95,15 @@ fn main() -> Result<()> {
         remarks_by_location = Some(load_remarks(&remarks_file)?);
     }
 
-    let diff = TextDiff::configure()
-        .algorithm(similar::Algorithm::Patience)
-        .timeout(Duration::from_secs(10 * 60))
-        .diff_lines(&before_content, &after_content);
+    let diff: Diff = match cli.diff_strategy {
+        DiffStrategy::Text => Diff::from(
+            TextDiff::configure()
+                .algorithm(similar::Algorithm::Patience)
+                .timeout(Duration::from_secs(10 * 60))
+                .diff_lines(&before_content, &after_content),
+        ),
+        DiffStrategy::Tree => Diff::from(diff_tree(&before_content, &after_content)),
+    };
 
     if cli.diff {
         print_diff(&diff);
