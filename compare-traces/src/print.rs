@@ -1,5 +1,5 @@
 use console::Style;
-use similar::{ChangeTag, DiffOp, DiffTag};
+use similar::{ChangeTag, DiffOp, DiffTag, DiffableStr};
 
 use crate::diff::Diff;
 
@@ -14,6 +14,9 @@ pub fn print_change(op: &DiffOp, change_tuples: &[(ChangeTag, &[&str])]) {
             };
             for slice in *slices {
                 print!("{}{}", style.apply_to(sign).bold(), style.apply_to(slice));
+                if !slice.ends_with_newline() {
+                    println!();
+                }
             }
         }
     } else {
@@ -26,6 +29,9 @@ pub fn print_change(op: &DiffOp, change_tuples: &[(ChangeTag, &[&str])]) {
             };
             for slice in *slices {
                 print!("{}{}", style.apply_to(sign).bold(), style.apply_to(slice));
+                if !slice.ends_with_newline() {
+                    println!();
+                }
             }
         }
     }
