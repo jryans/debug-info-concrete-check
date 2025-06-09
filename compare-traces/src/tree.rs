@@ -674,7 +674,7 @@ impl PartialEq for FuzzyEvent {
             return true;
         }
 
-        if self.0.depth != other.0.depth || self.0.event_type != other.0.event_type {
+        if self.0.event_type != other.0.event_type {
             return false;
         }
 

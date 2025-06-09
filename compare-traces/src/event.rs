@@ -42,7 +42,6 @@ pub struct Location {
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
 pub struct Event {
-    pub depth: usize,
     pub event_type: EventType,
     // TODO: Maybe store reference instead...?
     pub detail: String,
@@ -53,9 +52,6 @@ impl Event {
     // See `printEventFromLineInfo` in `collect-trace.cpp` for output path
     pub fn parse(event_str: &str) -> Result<Self> {
         let mut rest = event_str;
-
-        // Capture 1-based depth from indentation
-        let depth = line_depth(rest);
 
         // Remove any leading indentation
         rest = rest.trim_start();
@@ -108,7 +104,6 @@ impl Event {
         }
 
         Ok(Self {
-            depth,
             event_type,
             detail,
             location: Location {
