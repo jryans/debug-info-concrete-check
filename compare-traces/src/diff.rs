@@ -1,4 +1,4 @@
-use similar::{DiffOp, TextDiff};
+use similar::{group_diff_ops, DiffOp, TextDiff};
 
 use crate::tree::TreeDiff;
 
@@ -31,9 +31,8 @@ impl<'content> From<TreeDiff<'content>> for Diff<'content> {
 }
 
 impl Diff<'_> {
-    // JRS: Maybe return borrowed op instead...?
     pub fn grouped_ops(&self, n: usize) -> Vec<Vec<DiffOp>> {
-        // TODO: Actually group things properly
-        self.ops.iter().map(|op| vec![op.clone()]).collect()
+        // JRS: We may want to do our own custom grouping for tree diff ops...
+        group_diff_ops(self.ops.clone(), n)
     }
 }
