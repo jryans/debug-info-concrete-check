@@ -606,15 +606,19 @@ impl TreeEditOp {
                 new_index: after_index.unwrap(),
                 new_len: 1,
             }],
-            TreeEditOp::Remove { before_index } => vec![DiffOp::Delete {
-                old_index: before_index.unwrap(),
-                old_len: 1,
-                new_index: {
-                    // JRS: Not sure if we actually use this...?
-                    // Let's force this to 0 for now...
-                    0
-                },
-            }],
+            TreeEditOp::Remove { before_index } => {
+                let node = &before_tree[before_index];
+                let subtree_len = node.dfs_pre_order(before_tree).count();
+                vec![DiffOp::Delete {
+                    old_index: before_index.unwrap(),
+                    old_len: subtree_len,
+                    new_index: {
+                        // JRS: Not sure if we actually use this...?
+                        // Let's force this to 0 for now...
+                        0
+                    },
+                }]
+            }
             TreeEditOp::Replace {
                 before_index,
                 after_index,
@@ -1293,10 +1297,13 @@ pub fn diff_tree<'content>(
     }
 
     // Visit before nodes using depth-first, post-order search
+    let mut deleted_before_nodes: HashSet<TreeNodeIndex> = HashSet::new();
     let mut delete_ops: Vec<TreeEditOp> = Vec::new();
     for before_node in before_tree.dfs_post_order() {
         let before_index = &before_node.index;
         if !matching.contains_left(before_index) {
+            // Add to deleted node set
+            deleted_before_nodes.insert(*before_index);
             // Match not found, need to remove before node
             let op = TreeEditOp::Remove {
                 before_index: *before_index,
@@ -1305,14 +1312,30 @@ pub fn diff_tree<'content>(
             delete_ops.push(op);
         }
     }
-    // Now that we're done iterating the before tree,
-    // apply any delete ops found
-    for op in &delete_ops {
-        // Remove from the before tree
-        before_tree.edit(&op);
-    }
-    // Merge deletes into ops
-    edit_ops.extend(delete_ops);
+
+    // JRS: We used to apply the delete ops to the before tree here,
+    // but this completes counting the size of before sub-trees.
+    // Since we don't actually need to keep editing the before tree
+    // for correct positions (since the delete phase is last),
+    // we skip applying these edits for now.
+
+    // For diffing purposes, we'd rather have a single delete op for a sub-tree
+    // (instead of separate ops for each node in the sub-tree)
+    let filtered_delete_ops = delete_ops.into_iter().filter(|op| {
+        let before_index = match op {
+            TreeEditOp::Remove { before_index } => before_index,
+            _ => unreachable!(),
+        };
+        let parent_index = match before_tree[before_index].parent(&before_tree) {
+            Some(parent_node) => &parent_node.index,
+            None => return true,
+        };
+        // If parent node is also deleted, filter out child node
+        !deleted_before_nodes.contains(parent_index)
+    });
+
+    // Merge filtered deletes into ops
+    edit_ops.extend(filtered_delete_ops);
 
     // Convert edit ops to grouped diff ops
     // TODO: Sort and compact these into blocks instead of individual lines
@@ -1823,37 +1846,17 @@ CF: all_attrs_init at attr.c:155:3
         let diff = diff_tree(before_content, after_content);
         assert_eq!(
             diff.edit_ops,
-            vec![
-                TreeEditOp::Remove {
-                    before_index: TreeNodeIndex::Node(1),
-                },
-                TreeEditOp::Remove {
-                    before_index: TreeNodeIndex::Node(2),
-                },
-                TreeEditOp::Remove {
-                    before_index: TreeNodeIndex::Node(0),
-                },
-            ]
+            vec![TreeEditOp::Remove {
+                before_index: TreeNodeIndex::Node(0),
+            }]
         );
         assert_eq!(
             diff.grouped_diff_ops,
-            vec![
-                vec![DiffOp::Delete {
-                    old_index: 1,
-                    old_len: 1,
-                    new_index: 0,
-                }],
-                vec![DiffOp::Delete {
-                    old_index: 2,
-                    old_len: 1,
-                    new_index: 0,
-                }],
-                vec![DiffOp::Delete {
-                    old_index: 0,
-                    old_len: 1,
-                    new_index: 0,
-                }],
-            ]
+            vec![vec![DiffOp::Delete {
+                old_index: 0,
+                old_len: 3,
+                new_index: 0,
+            }]]
         );
     }
 
@@ -1890,37 +1893,17 @@ CF: system_path at exec-cmd.c:268:27
         let diff = diff_tree(before_content, after_content);
         assert_eq!(
             diff.edit_ops,
-            vec![
-                TreeEditOp::Remove {
-                    before_index: TreeNodeIndex::Node(6),
-                },
-                TreeEditOp::Remove {
-                    before_index: TreeNodeIndex::Node(7),
-                },
-                TreeEditOp::Remove {
-                    before_index: TreeNodeIndex::Node(5),
-                },
-            ]
+            vec![TreeEditOp::Remove {
+                before_index: TreeNodeIndex::Node(5),
+            }]
         );
         assert_eq!(
             diff.grouped_diff_ops,
-            vec![
-                vec![DiffOp::Delete {
-                    old_index: 6,
-                    old_len: 1,
-                    new_index: 0,
-                }],
-                vec![DiffOp::Delete {
-                    old_index: 7,
-                    old_len: 1,
-                    new_index: 0,
-                }],
-                vec![DiffOp::Delete {
-                    old_index: 5,
-                    old_len: 1,
-                    new_index: 0,
-                }],
-            ]
+            vec![vec![DiffOp::Delete {
+                old_index: 5,
+                old_len: 3,
+                new_index: 0,
+            }]]
         );
     }
 }
