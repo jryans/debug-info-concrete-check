@@ -796,7 +796,7 @@ pub fn analyse_and_print_report(
 
     let mut divergence_stats_by_coordinates: BTreeMap<Divergence, u64> = BTreeMap::new();
 
-    for op_group in diff.grouped_ops(1) {
+    for op_group in &diff.grouped_diff_ops {
         if log_enabled!(log::Level::Debug) {
             print_change_group(diff, &op_group);
             println!();
@@ -845,7 +845,7 @@ pub fn analyse_and_print_report(
                 println!();
             }
 
-            grouped_events.push((op, change_tuples_events));
+            grouped_events.push((*op, change_tuples_events));
         }
 
         // Check events against known divergence patterns

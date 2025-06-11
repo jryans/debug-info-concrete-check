@@ -7,7 +7,7 @@ use crate::tree::TreeDiff;
 pub struct Diff<'content> {
     pub before_lines: Vec<&'content str>,
     pub after_lines: Vec<&'content str>,
-    pub ops: Vec<DiffOp>,
+    pub grouped_diff_ops: Vec<Vec<DiffOp>>,
 }
 
 impl<'content> From<TextDiff<'content, 'content, 'content, str>> for Diff<'content> {
@@ -15,7 +15,7 @@ impl<'content> From<TextDiff<'content, 'content, 'content, str>> for Diff<'conte
         Diff {
             before_lines: text_diff.old_slices().to_vec(),
             after_lines: text_diff.new_slices().to_vec(),
-            ops: text_diff.ops().to_vec(),
+            grouped_diff_ops: group_diff_ops(text_diff.ops().to_vec(), 1),
         }
     }
 }
@@ -25,14 +25,7 @@ impl<'content> From<TreeDiff<'content>> for Diff<'content> {
         Diff {
             before_lines: tree_diff.before_lines,
             after_lines: tree_diff.after_lines,
-            ops: tree_diff.diff_ops,
+            grouped_diff_ops: tree_diff.grouped_diff_ops,
         }
-    }
-}
-
-impl Diff<'_> {
-    pub fn grouped_ops(&self, n: usize) -> Vec<Vec<DiffOp>> {
-        // JRS: We may want to do our own custom grouping for tree diff ops...
-        group_diff_ops(self.ops.clone(), n)
     }
 }

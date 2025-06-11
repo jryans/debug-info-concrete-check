@@ -51,14 +51,14 @@ pub fn print_change_group(diff: &Diff<'_>, op_group: &Vec<DiffOp>) {
         let change_tuples: Vec<_> = op
             .iter_slices(&diff.before_lines, &diff.after_lines)
             .collect();
-        print_change(&op, &change_tuples);
+        print_change(op, &change_tuples);
     }
 }
 
 pub fn print_diff(diff: &Diff<'_>) {
     // TODO: Add `context` option to reveal surrounding lines when desired
-    for op_group in diff.grouped_ops(0) {
-        print_change_group(&diff, &op_group);
+    for op_group in &diff.grouped_diff_ops {
+        print_change_group(diff, op_group);
         println!("---");
     }
 }

@@ -661,7 +661,7 @@ pub struct TreeDiff<'content> {
     pub before_lines: Vec<&'content str>,
     pub after_lines: Vec<&'content str>,
     pub edit_ops: Vec<TreeEditOp>,
-    pub diff_ops: Vec<DiffOp>,
+    pub grouped_diff_ops: Vec<Vec<DiffOp>>,
 }
 
 /// Override `Event` equality to allow for some source coordinate drift
@@ -1314,18 +1314,18 @@ pub fn diff_tree<'content>(
     // Merge deletes into ops
     edit_ops.extend(delete_ops);
 
-    // Convert edit ops to diff ops
+    // Convert edit ops to grouped diff ops
     // TODO: Sort and compact these into blocks instead of individual lines
-    let diff_ops: Vec<DiffOp> = edit_ops
+    let grouped_diff_ops: Vec<Vec<DiffOp>> = edit_ops
         .iter()
-        .flat_map(|edit_op| edit_op.to_diff_ops(&before_tree))
+        .map(|edit_op| edit_op.to_diff_ops(&before_tree))
         .collect();
 
     TreeDiff {
         before_lines,
         after_lines,
         edit_ops,
-        diff_ops,
+        grouped_diff_ops,
     }
 }
 
@@ -1773,28 +1773,30 @@ CF: D at file.tex
             ]
         );
         assert_eq!(
-            diff.diff_ops,
+            diff.grouped_diff_ops,
             vec![
-                DiffOp::Delete {
-                    old_index: 8,
-                    old_len: 2,
-                    new_index: 0,
-                },
-                DiffOp::Insert {
-                    old_index: 0,
-                    new_index: 4,
-                    new_len: 2,
-                },
-                DiffOp::Insert {
+                vec![
+                    DiffOp::Delete {
+                        old_index: 8,
+                        old_len: 2,
+                        new_index: 0,
+                    },
+                    DiffOp::Insert {
+                        old_index: 0,
+                        new_index: 4,
+                        new_len: 2,
+                    }
+                ],
+                vec![DiffOp::Insert {
                     old_index: 0,
                     new_index: 9,
                     new_len: 1,
-                },
-                DiffOp::Delete {
+                }],
+                vec![DiffOp::Delete {
                     old_index: 3,
                     old_len: 1,
                     new_index: 0,
-                },
+                }],
             ]
         );
     }
@@ -1834,23 +1836,23 @@ CF: all_attrs_init at attr.c:155:3
             ]
         );
         assert_eq!(
-            diff.diff_ops,
+            diff.grouped_diff_ops,
             vec![
-                DiffOp::Delete {
+                vec![DiffOp::Delete {
                     old_index: 1,
                     old_len: 1,
                     new_index: 0,
-                },
-                DiffOp::Delete {
+                }],
+                vec![DiffOp::Delete {
                     old_index: 2,
                     old_len: 1,
                     new_index: 0,
-                },
-                DiffOp::Delete {
+                }],
+                vec![DiffOp::Delete {
                     old_index: 0,
                     old_len: 1,
                     new_index: 0,
-                },
+                }],
             ]
         );
     }
@@ -1901,23 +1903,23 @@ CF: system_path at exec-cmd.c:268:27
             ]
         );
         assert_eq!(
-            diff.diff_ops,
+            diff.grouped_diff_ops,
             vec![
-                DiffOp::Delete {
+                vec![DiffOp::Delete {
                     old_index: 6,
                     old_len: 1,
                     new_index: 0,
-                },
-                DiffOp::Delete {
+                }],
+                vec![DiffOp::Delete {
                     old_index: 7,
                     old_len: 1,
                     new_index: 0,
-                },
-                DiffOp::Delete {
+                }],
+                vec![DiffOp::Delete {
                     old_index: 5,
                     old_len: 1,
                     new_index: 0,
-                },
+                }],
             ]
         );
     }
