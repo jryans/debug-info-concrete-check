@@ -225,20 +225,20 @@ impl Tree {
                 // but it may of course happen in general tree diffing.
                 // We support it here to allow testing the algorithm's examples.
                 let same_parent = current_parent_index == *parent_index;
-                let child = {
-                    let current_parent = &mut self[&current_parent_index];
-                    let current_child_position = current_parent
-                        .children
-                        .iter()
-                        .position(|child_index| child_index == before_index)
-                        .unwrap();
-                    current_parent.children.remove(current_child_position)
-                };
+                let current_parent = &mut self[&current_parent_index];
+                let current_child_position = current_parent
+                    .children
+                    .iter()
+                    .position(|child_index| child_index == before_index)
+                    .unwrap();
+                let child = current_parent.children.remove(current_child_position);
                 let target_parent = &mut self[parent_index];
                 let mut new_child_position = *child_position;
                 // Move op child position describes the position before any modification.
-                // For same-parent moves, the `remove` just above means we need to adjust by 1.
-                if same_parent {
+                // For same-parent moves, the `remove` just above means we need to adjust by 1
+                // if the previous position is before the new position (as removal will have
+                // shifted it over).
+                if same_parent && current_child_position < new_child_position {
                     new_child_position -= 1;
                 }
                 target_parent.children.insert(new_child_position, child);
