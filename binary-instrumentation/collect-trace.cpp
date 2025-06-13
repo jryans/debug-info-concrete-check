@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -123,14 +124,15 @@ std::vector<StackFrame> stack;
 bool stackDepthChanged = false;
 
 // Defaults to current depth, but non-current depth can also be passed in
-void printStackDepth(const std::optional<size_t> &depth = std::nullopt);
+void printStackDepth(raw_ostream &stream,
+                     const std::optional<size_t> &depth = std::nullopt);
 
-void printStackDepth(const std::optional<size_t> &depth) {
+void printStackDepth(raw_ostream &stream, const std::optional<size_t> &depth) {
   const size_t stackDepth = depth.value_or(stack.size());
-  // *trace << format("%4lu", stackDepth) << ": ";
+  // stream << format("%4lu", stackDepth) << ": ";
   // Print indentation to represent current stack depth
   for (size_t i = 1; i < stackDepth; ++i)
-    *trace << "  ";
+    stream << "  ";
 }
 
 void getInlinedChain(const QBDI::rword &address,
@@ -271,38 +273,42 @@ void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
                             const std::optional<bool> &tailCallWithoutInfo) {
   if (!isFunctionPrintable())
     return;
-  printStackDepth(depth);
+  // Write event text to string first, as code paths below may skip printing
+  std::string eventStr;
+  raw_string_ostream eventStream(eventStr);
+  printStackDepth(eventStream, depth);
   if (printSource && source == EventSource::InlinedChain) {
-    *trace << "I";
+    eventStream << "I";
   }
-  *trace << type;
-  *trace << ": ";
+  eventStream << type;
+  eventStream << ": ";
   if (lineInfo) {
-    *trace << lineInfo.FunctionName;
+    eventStream << lineInfo.FunctionName;
     if (address && verbose) {
       const auto functionOffset = *address - *lineInfo.StartAddress;
-      *trace << " + " << format_hex(functionOffset, 6);
+      eventStream << " + " << format_hex(functionOffset, 6);
     }
-    *trace << " at " << lineInfo.FileName;
+    eventStream << " at " << lineInfo.FileName;
     if (isLocationPrintable(type))
-      *trace << ":" << lineInfo.Line << ":" << lineInfo.Column;
+      eventStream << ":" << lineInfo.Line << ":" << lineInfo.Column;
   } else {
     if (address && vm && (*vm)->getCachedInstAnalysis(*address) &&
         (*vm)->getCachedInstAnalysis(*address)->isBranch) {
-      *trace << "Jump to external code";
+      eventStream << "Jump to external code";
       const std::optional<StringRef> symbolName =
           findDynamicFunctionName(*address);
       if (symbolName)
-        *trace << " for " << symbolName;
+        eventStream << " for " << symbolName;
     } else if (address && !isAddressInCurrentModule(*address)) {
-      *trace << "External code";
+      eventStream << "External code";
     } else {
-      *trace << "No info for this address";
+      eventStream << "No info for this address";
     }
   }
   if (tailCallWithoutInfo && *tailCallWithoutInfo)
-    *trace << " (TCWI)";
-  *trace << "\n";
+    eventStream << " (TCWI)";
+  eventStream << "\n";
+  *trace << eventStream.str();
   // Flush after each event to avoid trace corruption due to context switching
   // caused by threads, signals, etc.
   trace->flush();
