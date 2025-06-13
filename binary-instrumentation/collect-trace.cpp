@@ -294,13 +294,18 @@ void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
   } else {
     if (address && vm && (*vm)->getCachedInstAnalysis(*address) &&
         (*vm)->getCachedInstAnalysis(*address)->isBranch) {
+      if (type == EventType::CallFrom) {
+        // Skip "CF: Jump to external code" events, adds diff noise
+        return;
+      }
       eventStream << "Jump to external code";
       const std::optional<StringRef> symbolName =
           findDynamicFunctionName(*address);
       if (symbolName)
         eventStream << " for " << symbolName;
     } else if (address && !isAddressInCurrentModule(*address)) {
-      eventStream << "External code";
+      // Skip "CT: External code" events, adds diff noise
+      return;
     } else {
       eventStream << "No info for this address";
     }
