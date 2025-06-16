@@ -269,8 +269,6 @@ fn check_for_coordinates_changed(
 // Example diff:
 // + CF: strbuf_init at strbuf.c:57:2
 // +   CT: Jump to external code
-// +   CF: Jump to external code
-// +     CT: External code
 // +   RF: Jump to external code
 fn check_for_library_call_added(
     grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
@@ -288,8 +286,8 @@ fn check_for_library_call_added(
         let (change_tag, events) = &mut change_tuples_events[0];
         assert!(*change_tag == ChangeTag::Insert);
 
-        // Must have at least 5 events
-        if events.len() < 5 {
+        // Must have at least 3 events
+        if events.len() < 3 {
             continue;
         }
 
@@ -306,15 +304,11 @@ fn check_for_library_call_added(
             continue;
         }
 
-        // There should be 3 more events mentioning external code
-        let mut external_remaining: usize = 3;
-        for i in 2..5 {
-            if !events[i].detail.to_lowercase().contains("external code") {
-                break;
-            }
-            external_remaining -= 1;
+        // Third event should be return from external library
+        if events[2].event_type != EventType::ReturnFrom {
+            continue;
         }
-        if external_remaining > 0 {
+        if !events[2].detail.to_lowercase().contains("external code") {
             continue;
         }
 
@@ -322,17 +316,10 @@ fn check_for_library_call_added(
         let related_before_events = vec![];
         let mut related_after_events = vec![];
 
-        // First two are known to match
+        // First 3 are known to match
         related_after_events.push(events.pop_front().unwrap());
         related_after_events.push(events.pop_front().unwrap());
-
-        // Also take any more contiguous events about external code
-        while !events.is_empty() {
-            if !events[0].detail.to_lowercase().contains("external code") {
-                break;
-            }
-            related_after_events.push(events.pop_front().unwrap());
-        }
+        related_after_events.push(events.pop_front().unwrap());
 
         divergences.push(Divergence::new(
             DivergenceType::LibraryCallAdded,
@@ -349,10 +336,7 @@ fn check_for_library_call_added(
 // Example diff:
 //   CF: strbuf_vaddf at strbuf.c:397:8
 // < CT: Jump to external code for ___vsnprintf_chk
-// < CF: Jump to external code for ___vsnprintf_chk
 // > CT: Jump to external code for _vsnprintf
-// > CF: Jump to external code for _vsnprintf
-//     CT: External code
 // < RF: Jump to external code for ___vsnprintf_chk
 // > RF: Jump to external code for _vsnprintf
 fn check_for_library_call_replaced(
@@ -361,9 +345,7 @@ fn check_for_library_call_replaced(
     let mut divergences = vec![];
 
     let mut unchanged_call_from_slot = None;
-    let mut changed_call_slot = None;
-    let mut unchanged_call_to_slot = None;
-    let mut changed_return_from_slot = None;
+    let mut changed_call_return_slot = None;
 
     for (diff_op, change_tuples_events) in grouped_events {
         // Look for an unchanged call from
@@ -385,8 +367,8 @@ fn check_for_library_call_replaced(
             continue;
         }
 
-        // Look for changed external call from and to
-        if changed_call_slot.is_none() {
+        // Look for changed external call to and return from
+        if changed_call_return_slot.is_none() {
             if diff_op.tag() != DiffTag::Replace {
                 unchanged_call_from_slot = None;
                 continue;
@@ -398,6 +380,10 @@ fn check_for_library_call_replaced(
             assert!(*before_change_tag == ChangeTag::Delete);
             assert!(*after_change_tag == ChangeTag::Insert);
             // Ensure events mention external call
+            if before_events.len() < 2 || after_events.len() < 2 {
+                unchanged_call_from_slot = None;
+                continue;
+            }
             if before_events
                 .iter()
                 .any(|e| !e.detail.to_lowercase().contains("external code"))
@@ -408,65 +394,7 @@ fn check_for_library_call_replaced(
                 unchanged_call_from_slot = None;
                 continue;
             }
-            changed_call_slot = Some(change_tuples_events);
-            continue;
-        }
-
-        // Look for unchanged call to
-        // TODO: Perhaps make this optional...?
-        if unchanged_call_to_slot.is_none() {
-            if diff_op.tag() != DiffTag::Equal {
-                unchanged_call_from_slot = None;
-                changed_call_slot = None;
-                continue;
-            }
-            assert!(change_tuples_events.len() == 1);
-            let (change_tag, events) = &mut change_tuples_events[0];
-            assert!(*change_tag == ChangeTag::Equal);
-            if events.len() != 1 {
-                unchanged_call_from_slot = None;
-                changed_call_slot = None;
-                continue;
-            }
-            let event = &events[0];
-            if event.event_type != EventType::CallTo {
-                unchanged_call_from_slot = None;
-                changed_call_slot = None;
-                continue;
-            }
-            unchanged_call_to_slot = Some(change_tuples_events);
-            continue;
-        }
-
-        // Look for changed external return from
-        // TODO: Perhaps make this optional...?
-        if changed_return_from_slot.is_none() {
-            if diff_op.tag() != DiffTag::Replace {
-                unchanged_call_from_slot = None;
-                changed_call_slot = None;
-                unchanged_call_to_slot = None;
-                continue;
-            }
-            assert!(change_tuples_events.len() == 2);
-            let (befores, afters) = change_tuples_events.split_at_mut(1);
-            let (before_change_tag, before_events) = &mut befores[0];
-            let (after_change_tag, after_events) = &mut afters[0];
-            assert!(*before_change_tag == ChangeTag::Delete);
-            assert!(*after_change_tag == ChangeTag::Insert);
-            // Ensure events mention external call
-            if before_events
-                .iter()
-                .any(|e| !e.detail.to_lowercase().contains("external code"))
-                || after_events
-                    .iter()
-                    .any(|e| !e.detail.to_lowercase().contains("external code"))
-            {
-                unchanged_call_from_slot = None;
-                changed_call_slot = None;
-                unchanged_call_to_slot = None;
-                continue;
-            }
-            changed_return_from_slot = Some(change_tuples_events);
+            changed_call_return_slot = Some(change_tuples_events);
         }
 
         // Extract related events
@@ -480,26 +408,7 @@ fn check_for_library_call_replaced(
         }
 
         {
-            let tuples_events = changed_call_slot.unwrap();
-            let (befores, afters) = tuples_events.split_at_mut(1);
-            let (_, before_events) = &mut befores[0];
-            let (_, after_events) = &mut afters[0];
-            while !before_events.is_empty() {
-                related_before_events.push(before_events.pop_front().unwrap());
-            }
-            while !after_events.is_empty() {
-                related_after_events.push(after_events.pop_front().unwrap());
-            }
-        }
-
-        {
-            let events = &mut unchanged_call_to_slot.unwrap()[0].1;
-            related_before_events.push(events.pop_front().unwrap());
-            related_after_events.push(related_before_events.last().unwrap().clone());
-        }
-
-        {
-            let tuples_events = changed_return_from_slot.unwrap();
+            let tuples_events = changed_call_return_slot.unwrap();
             let (befores, afters) = tuples_events.split_at_mut(1);
             let (_, before_events) = &mut befores[0];
             let (_, after_events) = &mut afters[0];
@@ -519,9 +428,7 @@ fn check_for_library_call_replaced(
         ));
 
         unchanged_call_from_slot = None;
-        changed_call_slot = None;
-        unchanged_call_to_slot = None;
-        changed_return_from_slot = None;
+        changed_call_return_slot = None;
     }
 
     divergences
@@ -530,8 +437,6 @@ fn check_for_library_call_replaced(
 // Example diff:
 // - CF: strbuf_init at strbuf.c:57:2
 // -   CT: Jump to external code
-// -   CF: Jump to external code
-// -     CT: External code
 // -   RF: Jump to external code
 fn check_for_library_call_removed(
     grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
@@ -549,8 +454,8 @@ fn check_for_library_call_removed(
         let (change_tag, events) = &mut change_tuples_events[0];
         assert!(*change_tag == ChangeTag::Delete);
 
-        // Must have at least 2 events
-        if events.len() < 2 {
+        // Must have at least 3 events
+        if events.len() < 3 {
             continue;
         }
 
@@ -567,21 +472,22 @@ fn check_for_library_call_removed(
             continue;
         }
 
+        // Third event should be return from external library
+        if events[2].event_type != EventType::ReturnFrom {
+            continue;
+        }
+        if !events[2].detail.to_lowercase().contains("external code") {
+            continue;
+        }
+
         // Extract related events
         let mut related_before_events = vec![];
         let related_after_events = vec![];
 
-        // First two are known to match
+        // First 3 are known to match
         related_before_events.push(events.pop_front().unwrap());
         related_before_events.push(events.pop_front().unwrap());
-
-        // Also take any more contiguous events about external code
-        while !events.is_empty() {
-            if !events[0].detail.to_lowercase().contains("external code") {
-                break;
-            }
-            related_before_events.push(events.pop_front().unwrap());
-        }
+        related_before_events.push(events.pop_front().unwrap());
 
         divergences.push(Divergence::new(
             DivergenceType::LibraryCallRemoved,
@@ -1066,12 +972,10 @@ mod tests {
         // Example diff:
         // - CF: strbuf_init at strbuf.c:57:2
         // -   CT: Jump to external code
-        // -   CF: Jump to external code
-        // -     CT: External code
         // -   RF: Jump to external code
         let op = DiffOp::Delete {
             old_index: 0,
-            old_len: 5,
+            old_len: 3,
             new_index: 0,
         };
         let change_tuples_events = Vec::from([(
@@ -1079,8 +983,6 @@ mod tests {
             VecDeque::from([
                 Event::parse("CF: strbuf_init at strbuf.c:57:2").unwrap(),
                 Event::parse("CT: Jump to external code").unwrap(),
-                Event::parse("CF: Jump to external code").unwrap(),
-                Event::parse("CT: External code").unwrap(),
                 Event::parse("RF: Jump to external code").unwrap(),
             ]),
         )]);
@@ -1092,7 +994,7 @@ mod tests {
             divergence.divergence_type,
             DivergenceType::LibraryCallRemoved
         );
-        assert_eq!(divergence.before_events.len(), 5);
+        assert_eq!(divergence.before_events.len(), 3);
     }
 
     #[test]
@@ -1100,17 +1002,13 @@ mod tests {
         // Example diff:
         // - CF: init_repository_format at setup.c:710:33
         // -   CT: Jump to external code
-        // -   CF: Jump to external code
-        // -     CT: External code
         // -   RF: Jump to external code
         // - CF: init_repository_format at setup.c:712:2
         // -   CT: Jump to external code
-        // -   CF: Jump to external code
-        // -     CT: External code
         // -   RF: Jump to external code
         let op = DiffOp::Delete {
             old_index: 0,
-            old_len: 10,
+            old_len: 6,
             new_index: 0,
         };
         let change_tuples_events = Vec::from([(
@@ -1118,13 +1016,9 @@ mod tests {
             VecDeque::from([
                 Event::parse("CF: init_repository_format at setup.c:710:33").unwrap(),
                 Event::parse("CT: Jump to external code").unwrap(),
-                Event::parse("CF: Jump to external code").unwrap(),
-                Event::parse("CT: External code").unwrap(),
                 Event::parse("RF: Jump to external code").unwrap(),
                 Event::parse("CF: init_repository_format at setup.c:712:2").unwrap(),
                 Event::parse("CT: Jump to external code").unwrap(),
-                Event::parse("CF: Jump to external code").unwrap(),
-                Event::parse("CT: External code").unwrap(),
                 Event::parse("RF: Jump to external code").unwrap(),
             ]),
         )]);
@@ -1136,7 +1030,7 @@ mod tests {
                 divergence.divergence_type,
                 DivergenceType::LibraryCallRemoved
             );
-            assert_eq!(divergence.before_events.len(), 5);
+            assert_eq!(divergence.before_events.len(), 3);
         }
     }
 
