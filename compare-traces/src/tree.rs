@@ -5,6 +5,7 @@ use std::ops::{Index, IndexMut};
 use bimap::BiHashMap;
 use indexmap::IndexMap;
 use similar::{capture_diff_slices, DiffOp};
+use strsim::normalized_levenshtein;
 
 use crate::event::{line_depth, Event, Eventable};
 
@@ -669,7 +670,7 @@ pub struct TreeDiff<'content> {
 }
 
 /// Override `Event` equality to allow for some source coordinate drift
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct FuzzyEvent(Event);
 
 impl PartialEq for FuzzyEvent {
@@ -684,6 +685,19 @@ impl PartialEq for FuzzyEvent {
 
         let self_loc = &self.0.location;
         let other_loc = &other.0.location;
+
+        if self_loc.function.is_some()
+            && self_loc.file.is_none()
+            && other_loc.function.is_some()
+            && other_loc.file.is_none()
+        {
+            // Most likely an external code event
+            // Allow some function name edits to detect call replacement
+            return normalized_levenshtein(
+                self_loc.function.as_ref().unwrap(),
+                other_loc.function.as_ref().unwrap(),
+            ) >= 0.5;
+        }
 
         if self_loc.function != other_loc.function || self_loc.file != other_loc.file {
             return false;
@@ -1595,6 +1609,15 @@ CF: system_path at exec-cmd.c:265:6
             leaves_lcs.matched,
             vec![(TreeNodeIndex::Node(1), TreeNodeIndex::Node(1))]
         );
+    }
+
+    #[test]
+    fn tree_fuzzy_external_function_replacement() {
+        let event_1 = FuzzyEvent(Event::parse("CT: Jump to external code for memcmp").unwrap());
+        let event_2 = FuzzyEvent(Event::parse("CT: Jump to external code for bcmp").unwrap());
+        assert_eq!(event_1, event_2);
+        let event_3 = FuzzyEvent(Event::parse("CT: Jump to external code for pomelo").unwrap());
+        assert_ne!(event_1, event_3);
     }
 
     #[test]

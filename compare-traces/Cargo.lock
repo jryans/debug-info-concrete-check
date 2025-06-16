@@ -160,6 +160,7 @@ dependencies = [
  "serde",
  "serde_yaml",
  "similar",
+ "strsim",
 ]
 
 [[package]]
