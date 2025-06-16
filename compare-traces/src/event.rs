@@ -101,6 +101,11 @@ impl Event {
             file = components.next().map(|s| s.to_owned());
             line = components.next().map(|s| s.parse::<u64>().unwrap());
             column = components.next().map(|s| s.parse::<u64>().unwrap());
+        } else if rest.contains(" external code for ") {
+            // Example: Jump to external code for getc_unlocked
+            // Function should always be present (when "for" is)
+            let segments = rest.split_ascii_whitespace();
+            function = segments.last().map(|s| s.to_owned());
         }
 
         Ok(Self {

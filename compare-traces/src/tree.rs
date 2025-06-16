@@ -684,11 +684,6 @@ impl PartialEq for FuzzyEvent {
 
         let self_loc = &self.0.location;
         let other_loc = &other.0.location;
-        if self_loc.function.is_none() || other_loc.function.is_none() {
-            // Must be a misc. unparsed event, such as external code,
-            // so we fallback to an exact match on `detail`
-            return self.0.detail == other.0.detail;
-        }
 
         if self_loc.function != other_loc.function || self_loc.file != other_loc.file {
             return false;
