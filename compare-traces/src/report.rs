@@ -526,6 +526,7 @@ fn check_for_program_call_removed(
         }
 
         // Event sequence should be call from, call to, return from
+        // Call to and return from should not mention external code
         // TODO: Support more complex trees with nested calls
         if events[0].event_type != EventType::CallFrom {
             continue;
@@ -533,7 +534,13 @@ fn check_for_program_call_removed(
         if events[1].event_type != EventType::CallTo {
             continue;
         }
+        if events[1].detail.to_lowercase().contains("external code") {
+            continue;
+        }
         if events[2].event_type != EventType::ReturnFrom {
+            continue;
+        }
+        if events[2].detail.to_lowercase().contains("external code") {
             continue;
         }
 
@@ -562,51 +569,50 @@ fn check_for_known_divergences(
 
     // Check for divergences at least once and keep going each time more are found
     // JRS: Change patterns to produce all matching divergences up front...?
-    let mut continue_checking = true;
-    while continue_checking {
-        continue_checking = false;
+    loop {
         {
             let mut divergences_found = check_for_coordinates_removed(grouped_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
-                continue_checking = true;
+                continue;
             }
         }
         {
             let mut divergences_found = check_for_coordinates_changed(grouped_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
-                continue_checking = true;
+                continue;
             }
         }
         {
             let mut divergences_found = check_for_library_call_added(grouped_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
-                continue_checking = true;
+                continue;
             }
         }
         {
             let mut divergences_found = check_for_library_call_replaced(grouped_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
-                continue_checking = true;
+                continue;
             }
         }
         {
             let mut divergences_found = check_for_library_call_removed(grouped_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
-                continue_checking = true;
+                continue;
             }
         }
         {
             let mut divergences_found = check_for_program_call_removed(grouped_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
-                continue_checking = true;
+                continue;
             }
         }
+        break;
     }
 
     // If any events remain, record an unknown divergence
