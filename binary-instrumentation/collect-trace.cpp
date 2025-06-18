@@ -54,6 +54,8 @@ bool printReturnFromLocation = true;
 bool includeExternalLibrary = true;
 bool includeInternalFunction = true;
 
+pid_t pid;
+pid_t ppid;
 std::unique_ptr<raw_fd_ostream> trace;
 
 std::unique_ptr<MemoryBuffer> execBuffer;
@@ -122,6 +124,33 @@ struct StackFrame {
 // Newest frames are at the end of the stack vector
 std::vector<StackFrame> stack;
 bool stackDepthChanged = false;
+
+bool openTrace() {
+  // Use process IDs in trace file name in case of process forks
+  pid = getpid();
+  ppid = getppid();
+  auto traceBase = verbose ? "trace-verbose" : "trace";
+  auto traceName = formatv("{0}-{1}-{2}", traceBase, ppid, pid).str();
+  std::error_code error;
+  int fileDescriptor;
+  error = sys::fs::openFileForWrite(
+      traceName, fileDescriptor, sys::fs::CD_CreateAlways,
+      append ? sys::fs::OF_Append : sys::fs::OF_None);
+  if (error)
+    return false;
+  // We don't want the trace to auto-close in case the process forks
+  // (the child would have the same trace file descriptor)
+  trace =
+      std::make_unique<raw_fd_ostream>(fileDescriptor, /* shouldClose */ false);
+  if (verbose)
+    *trace << "PPID: " << ppid << ", PID: " << pid << "\n";
+  return !error;
+}
+
+bool reopenTrace() {
+  trace->flush();
+  return openTrace();
+}
 
 // Defaults to current depth, but non-current depth can also be passed in
 void printStackDepth(raw_ostream &stream,
@@ -427,6 +456,28 @@ void popStackFrame(const QBDI::VMInstanceRef &vm) {
                vm->getCachedInstAnalysis(frame.callToAddress)->isBranch) {
       // Frame appears to represent a branch to external code
       frameIsBranchToExternal = true;
+
+      // If we happen to be returning from a call to `fork`,
+      // check if our process ID changed
+      const std::optional<StringRef> symbolName =
+          findDynamicFunctionName(frame.callToAddress);
+      if (symbolName && symbolName->equals("fork")) {
+        if (verbose)
+          *trace << "Returned from fork, checking PID...\n";
+        pid_t currentPid = getpid();
+        if (currentPid != pid) {
+          if (verbose)
+            *trace << "PID changed to " << currentPid
+                   << ", need to restart trace!\n";
+          // Assuming the child process calls `exec` soon after,
+          // the child trace will be reopened again starting from `main`
+          // by `qbdipreload_on_run`
+          if (!reopenTrace()) {
+            errs() << "Error: Unable to restart trace file\n";
+            std::abort();
+          }
+        }
+      }
     }
 
     if (includeExternalLibrary || !frameIsBranchToExternal)
@@ -897,15 +948,7 @@ int qbdipreload_on_main(int argc, char **argv) {
 
 int qbdipreload_on_run(QBDI::VMInstanceRef vm, QBDI::rword start,
                        QBDI::rword stop) {
-  // Use process IDs in trace file name in case of process forks
-  auto pid = getpid();
-  auto ppid = getppid();
-  auto traceBase = verbose ? "trace-verbose" : "trace";
-  auto traceName = formatv("{0}-{1}-{2}", traceBase, ppid, pid).str();
-  std::error_code error;
-  trace = std::make_unique<raw_fd_ostream>(
-      traceName, error, append ? sys::fs::OF_Append : sys::fs::OF_None);
-  if (error) {
+  if (!openTrace()) {
     errs() << "Error: Unable to open trace file\n";
     return QBDIPRELOAD_ERR_STARTUP_FAILED;
   }
