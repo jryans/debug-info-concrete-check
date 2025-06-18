@@ -753,25 +753,41 @@ impl Eventable for FuzzyEvent {
 
 /// Label each event by hashing all function names along its path in the tree.
 fn tree_event_labels<E: Eventable>(tree: &Tree, events: &[E]) -> Vec<u64> {
-    let mut hashers: Vec<DefaultHasher> = Vec::with_capacity(events.len());
-
     // For each event, look for parent's previously computed hasher,
-    // and then add that event's own function name.
+    // and then add that event's own function name (in case it has children)
+    let mut hashers_as_parents: Vec<DefaultHasher> = Vec::with_capacity(events.len());
     for i in 0..events.len() {
         let event = events[i].as_event();
         let node = &tree[&TreeNodeIndex::Node(i)];
         let parent_index = node.parent(tree).unwrap().index;
         let parent_hasher = match parent_index {
-            TreeNodeIndex::Node(p) => Some(&hashers[p]),
+            TreeNodeIndex::Node(p) => Some(&hashers_as_parents[p]),
             TreeNodeIndex::Root => None,
         };
         let mut hasher: DefaultHasher =
             parent_hasher.map_or(DefaultHasher::new(), |hasher| hasher.clone());
         event.location.function.hash(&mut hasher);
-        hashers.push(hasher);
+        hashers_as_parents.push(hasher);
     }
 
-    hashers.into_iter().map(|hasher| hasher.finish()).collect()
+    // For each event, use its _parent's_ hash as the label
+    // (excluding its own function name from the label)
+    let labels_as_parents: Vec<u64> = hashers_as_parents
+        .into_iter()
+        .map(|hasher| hasher.finish())
+        .collect();
+    let mut labels: Vec<u64> = Vec::with_capacity(events.len());
+    for i in 0..events.len() {
+        let node = &tree[&TreeNodeIndex::Node(i)];
+        let parent_index = node.parent(tree).unwrap().index;
+        let label = match parent_index {
+            TreeNodeIndex::Node(p) => labels_as_parents[p],
+            TreeNodeIndex::Root => 0,
+        };
+        labels.push(label);
+    }
+
+    labels
 }
 
 fn matching_bimap<T>(
