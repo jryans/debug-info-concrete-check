@@ -4,7 +4,7 @@ use std::ops::{Index, IndexMut};
 
 use bimap::BiHashMap;
 use indexmap::IndexMap;
-use similar::{capture_diff_slices, DiffOp};
+use similar::{capture_diff_slices, DiffOp, DiffTag};
 use strsim::normalized_levenshtein;
 
 use crate::event::{line_depth, Event, Eventable};
@@ -657,6 +657,45 @@ impl TreeEditOp {
                     },
                 ]
             }
+        }
+    }
+}
+
+fn compact_diff_ops(grouped_diff_ops: &mut Vec<Vec<DiffOp>>) {
+    for i in 0..(grouped_diff_ops.len() - 1) {
+        // Double check end condition, as we may remove items during compaction
+        if i > grouped_diff_ops.len() - 2 {
+            break;
+        }
+        let current_op_group = &grouped_diff_ops[i];
+        let next_op_group = &grouped_diff_ops[i + 1];
+        let current_op_group_tags = current_op_group.iter().map(|op| op.tag());
+        let next_op_group_tags = next_op_group.iter().map(|op| op.tag());
+        // If both op groups have the same tags, compaction may be possible
+        if current_op_group_tags.ne(next_op_group_tags) {
+            continue;
+        }
+        // Compaction supports groups with a single op only
+        if current_op_group.len() > 1 {
+            continue;
+        }
+        let current_op = current_op_group[0];
+        let next_op = next_op_group[0];
+        // Compaction supports `Replace` ops only
+        if current_op.tag() != DiffTag::Replace {
+            continue;
+        }
+        // Compact `Replace` op if adjacent
+        if current_op.old_range().end == next_op.old_range().start {
+            let compacted_op_group = vec![DiffOp::Replace {
+                old_index: current_op.old_range().start,
+                old_len: current_op.old_range().len() + next_op.old_range().len(),
+                new_index: current_op.new_range().start,
+                new_len: current_op.new_range().len() + next_op.new_range().len(),
+            }];
+            grouped_diff_ops[i] = compacted_op_group;
+            // TODO: Use a different data structure to make this more efficient...?
+            grouped_diff_ops.remove(i + 1);
         }
     }
 }
@@ -1369,11 +1408,11 @@ pub fn diff_tree<'content>(
     edit_ops.extend(filtered_delete_ops);
 
     // Convert edit ops to grouped diff ops
-    // TODO: Sort and compact these into blocks instead of individual lines
-    let grouped_diff_ops: Vec<Vec<DiffOp>> = edit_ops
+    let mut grouped_diff_ops: Vec<Vec<DiffOp>> = edit_ops
         .iter()
         .map(|edit_op| edit_op.to_diff_ops(&before_tree))
         .collect();
+    compact_diff_ops(&mut grouped_diff_ops);
 
     TreeDiff {
         before_lines,
@@ -1943,6 +1982,43 @@ CF: system_path at exec-cmd.c:268:27
                 old_index: 5,
                 old_len: 3,
                 new_index: 0,
+            }]]
+        );
+    }
+
+    #[test]
+    fn compact_adjacent_diff_ops() {
+        let before_content = "
+CF: strbuf_vaddf at strbuf.c:397:8
+  CT: Jump to external code for ___vsnprintf_chk
+  RF: Jump to external code for ___vsnprintf_chk"
+            .trim();
+        let after_content = "
+CF: strbuf_vaddf at strbuf.c:397:8
+  CT: Jump to external code for _vsnprintf
+  RF: Jump to external code for _vsnprintf"
+            .trim();
+        let diff = diff_tree(before_content, after_content);
+        assert_eq!(
+            diff.edit_ops,
+            vec![
+                TreeEditOp::Replace {
+                    before_index: TreeNodeIndex::Node(1),
+                    after_index: TreeNodeIndex::Node(1),
+                },
+                TreeEditOp::Replace {
+                    before_index: TreeNodeIndex::Node(2),
+                    after_index: TreeNodeIndex::Node(2),
+                }
+            ]
+        );
+        assert_eq!(
+            diff.grouped_diff_ops,
+            vec![vec![DiffOp::Replace {
+                old_index: 1,
+                old_len: 2,
+                new_index: 1,
+                new_len: 2,
             }]]
         );
     }
