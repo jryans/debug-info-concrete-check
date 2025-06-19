@@ -563,6 +563,7 @@ fn check_for_program_call_removed(
 }
 
 fn check_for_known_divergences(
+    diff: &Diff<'_>,
     grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
@@ -761,7 +762,7 @@ pub fn analyse_and_print_report(
         }
 
         // Check events against known divergence patterns
-        let mut new_divergences = check_for_known_divergences(&mut grouped_events);
+        let mut new_divergences = check_for_known_divergences(diff, &mut grouped_events);
         for divergence in &mut new_divergences {
             if log_enabled!(log::Level::Debug) {
                 println!("{:#?}", divergence);
@@ -900,24 +901,34 @@ mod tests {
         // Example diff:
         // < CF: getnanotime at trace.c:397:18
         // > CF: getnanotime at trace.c:0:0
-        let op = DiffOp::Replace {
-            old_index: 0,
-            old_len: 1,
-            new_index: 0,
-            new_len: 1,
+        let diff = Diff {
+            before_lines: Vec::from(["CF: getnanotime at trace.c:397:18"]),
+            after_lines: Vec::from(["CF: getnanotime at trace.c:0:0"]),
+            grouped_diff_ops: Vec::from([Vec::from([DiffOp::Replace {
+                old_index: 0,
+                old_len: 1,
+                new_index: 0,
+                new_len: 1,
+            }])]),
         };
         let change_tuples_events = Vec::from([
             (
                 ChangeTag::Delete,
-                VecDeque::from([Event::parse("CF: getnanotime at trace.c:397:18").unwrap()]),
+                diff.before_lines
+                    .iter()
+                    .map(|str| Event::parse(str).unwrap())
+                    .collect::<VecDeque<_>>(),
             ),
             (
                 ChangeTag::Insert,
-                VecDeque::from([Event::parse("CF: getnanotime at trace.c:0:0").unwrap()]),
+                diff.after_lines
+                    .iter()
+                    .map(|str| Event::parse(str).unwrap())
+                    .collect::<VecDeque<_>>(),
             ),
         ]);
-        let mut grouped_events = [(op, change_tuples_events)];
-        let divergences = check_for_known_divergences(&mut grouped_events);
+        let mut grouped_events = [(diff.grouped_diff_ops[0][0], change_tuples_events)];
+        let divergences = check_for_known_divergences(&diff, &mut grouped_events);
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
@@ -937,28 +948,34 @@ mod tests {
         // Example diff:
         // < CT: xstrdup_or_null at git-compat-util.h:1168:0
         // > CT: xstrdup_or_null at git-compat-util.h:1169:9
-        let op = DiffOp::Replace {
-            old_index: 0,
-            old_len: 1,
-            new_index: 0,
-            new_len: 1,
+        let diff = Diff {
+            before_lines: Vec::from(["CT: xstrdup_or_null at git-compat-util.h:1168:0"]),
+            after_lines: Vec::from(["CT: xstrdup_or_null at git-compat-util.h:1169:9"]),
+            grouped_diff_ops: Vec::from([Vec::from([DiffOp::Replace {
+                old_index: 0,
+                old_len: 1,
+                new_index: 0,
+                new_len: 1,
+            }])]),
         };
         let change_tuples_events = Vec::from([
             (
                 ChangeTag::Delete,
-                VecDeque::from([
-                    Event::parse("CT: xstrdup_or_null at git-compat-util.h:1168:0").unwrap(),
-                ]),
+                diff.before_lines
+                    .iter()
+                    .map(|str| Event::parse(str).unwrap())
+                    .collect::<VecDeque<_>>(),
             ),
             (
                 ChangeTag::Insert,
-                VecDeque::from([
-                    Event::parse("CT: xstrdup_or_null at git-compat-util.h:1169:9").unwrap(),
-                ]),
+                diff.after_lines
+                    .iter()
+                    .map(|str| Event::parse(str).unwrap())
+                    .collect::<VecDeque<_>>(),
             ),
         ]);
-        let mut grouped_events = [(op, change_tuples_events)];
-        let divergences = check_for_known_divergences(&mut grouped_events);
+        let mut grouped_events = [(diff.grouped_diff_ops[0][0], change_tuples_events)];
+        let divergences = check_for_known_divergences(&diff, &mut grouped_events);
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
@@ -979,21 +996,28 @@ mod tests {
         // - CF: strbuf_init at strbuf.c:57:2
         // -   CT: Jump to external code
         // -   RF: Jump to external code
-        let op = DiffOp::Delete {
-            old_index: 0,
-            old_len: 3,
-            new_index: 0,
+        let diff = Diff {
+            before_lines: Vec::from([
+                "CF: strbuf_init at strbuf.c:57:2",
+                "  CT: Jump to external code",
+                "  RF: Jump to external code",
+            ]),
+            after_lines: Vec::from([]),
+            grouped_diff_ops: Vec::from([Vec::from([DiffOp::Delete {
+                old_index: 0,
+                old_len: 3,
+                new_index: 0,
+            }])]),
         };
         let change_tuples_events = Vec::from([(
             ChangeTag::Delete,
-            VecDeque::from([
-                Event::parse("CF: strbuf_init at strbuf.c:57:2").unwrap(),
-                Event::parse("CT: Jump to external code").unwrap(),
-                Event::parse("RF: Jump to external code").unwrap(),
-            ]),
+            diff.before_lines
+                .iter()
+                .map(|str| Event::parse(str).unwrap())
+                .collect::<VecDeque<_>>(),
         )]);
-        let mut grouped_events = [(op, change_tuples_events)];
-        let divergences = check_for_known_divergences(&mut grouped_events);
+        let mut grouped_events = [(diff.grouped_diff_ops[0][0], change_tuples_events)];
+        let divergences = check_for_known_divergences(&diff, &mut grouped_events);
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
@@ -1012,24 +1036,31 @@ mod tests {
         // - CF: init_repository_format at setup.c:712:2
         // -   CT: Jump to external code
         // -   RF: Jump to external code
-        let op = DiffOp::Delete {
-            old_index: 0,
-            old_len: 6,
-            new_index: 0,
+        let diff = Diff {
+            before_lines: Vec::from([
+                "CF: init_repository_format at setup.c:710:33",
+                "  CT: Jump to external code",
+                "  RF: Jump to external code",
+                "CF: init_repository_format at setup.c:712:2",
+                "  CT: Jump to external code",
+                "  RF: Jump to external code",
+            ]),
+            after_lines: Vec::from([]),
+            grouped_diff_ops: Vec::from([Vec::from([DiffOp::Delete {
+                old_index: 0,
+                old_len: 6,
+                new_index: 0,
+            }])]),
         };
         let change_tuples_events = Vec::from([(
             ChangeTag::Delete,
-            VecDeque::from([
-                Event::parse("CF: init_repository_format at setup.c:710:33").unwrap(),
-                Event::parse("CT: Jump to external code").unwrap(),
-                Event::parse("RF: Jump to external code").unwrap(),
-                Event::parse("CF: init_repository_format at setup.c:712:2").unwrap(),
-                Event::parse("CT: Jump to external code").unwrap(),
-                Event::parse("RF: Jump to external code").unwrap(),
-            ]),
+            diff.before_lines
+                .iter()
+                .map(|str| Event::parse(str).unwrap())
+                .collect::<VecDeque<_>>(),
         )]);
-        let mut grouped_events = [(op, change_tuples_events)];
-        let divergences = check_for_known_divergences(&mut grouped_events);
+        let mut grouped_events = [(diff.grouped_diff_ops[0][0], change_tuples_events)];
+        let divergences = check_for_known_divergences(&diff, &mut grouped_events);
         assert_eq!(divergences.len(), 2);
         for divergence in &divergences {
             assert_eq!(
@@ -1046,21 +1077,28 @@ mod tests {
         // - CF: is_absolute_path at cache.h:1276:32
         // -   CT: git_has_dos_drive_prefix at git-compat-util.h:432:0
         // -   RF: git_has_dos_drive_prefix at git-compat-util.h:433:2
-        let op = DiffOp::Delete {
-            old_index: 0,
-            old_len: 3,
-            new_index: 0,
+        let diff = Diff {
+            before_lines: Vec::from([
+                "CF: is_absolute_path at cache.h:1276:32",
+                "  CT: git_has_dos_drive_prefix at git-compat-util.h:432:0",
+                "  RF: git_has_dos_drive_prefix at git-compat-util.h:433:2",
+            ]),
+            after_lines: Vec::from([]),
+            grouped_diff_ops: Vec::from([Vec::from([DiffOp::Delete {
+                old_index: 0,
+                old_len: 3,
+                new_index: 0,
+            }])]),
         };
         let change_tuples_events = Vec::from([(
             ChangeTag::Delete,
-            VecDeque::from([
-                Event::parse("CF: is_absolute_path at cache.h:1276:32").unwrap(),
-                Event::parse("CT: git_has_dos_drive_prefix at git-compat-util.h:432:0").unwrap(),
-                Event::parse("RF: git_has_dos_drive_prefix at git-compat-util.h:433:2").unwrap(),
-            ]),
+            diff.before_lines
+                .iter()
+                .map(|str| Event::parse(str).unwrap())
+                .collect::<VecDeque<_>>(),
         )]);
-        let mut grouped_events = [(op, change_tuples_events)];
-        let divergences = check_for_known_divergences(&mut grouped_events);
+        let mut grouped_events = [(diff.grouped_diff_ops[0][0], change_tuples_events)];
+        let divergences = check_for_known_divergences(&diff, &mut grouped_events);
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
