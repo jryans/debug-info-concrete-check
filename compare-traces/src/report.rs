@@ -332,7 +332,6 @@ fn check_for_library_call_added(
     divergences
 }
 
-// TODO: Break this up into smaller functions
 // Example diff:
 //   CF: strbuf_vaddf at strbuf.c:397:8
 // <   CT: Jump to external code for ___vsnprintf_chk
@@ -340,61 +339,44 @@ fn check_for_library_call_added(
 // <   RF: Jump to external code for ___vsnprintf_chk
 // >   RF: Jump to external code for _vsnprintf
 fn check_for_library_call_replaced(
+    diff: &Diff<'_>,
     grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
-    let mut unchanged_call_from_slot = None;
-    let mut changed_call_return_slot = None;
-
     for (diff_op, change_tuples_events) in grouped_events {
-        // Look for an unchanged call from
-        if unchanged_call_from_slot.is_none() {
-            if diff_op.tag() != DiffTag::Equal {
-                continue;
-            }
-            assert!(change_tuples_events.len() == 1);
-            let (change_tag, events) = &mut change_tuples_events[0];
-            assert!(*change_tag == ChangeTag::Equal);
-            if events.len() != 1 {
-                continue;
-            }
-            let event = &events[0];
-            if event.event_type != EventType::CallFrom {
-                continue;
-            }
-            unchanged_call_from_slot = Some(change_tuples_events);
+        // Look for changed external call to and return from
+        if diff_op.tag() != DiffTag::Replace {
+            continue;
+        }
+        assert!(change_tuples_events.len() == 2);
+        let (befores, afters) = change_tuples_events.split_at_mut(1);
+        let (before_change_tag, before_events) = &mut befores[0];
+        let (after_change_tag, after_events) = &mut afters[0];
+        assert!(*before_change_tag == ChangeTag::Delete);
+        assert!(*after_change_tag == ChangeTag::Insert);
+        // Ensure events mention external call
+        if before_events.len() < 2 || after_events.len() < 2 {
+            continue;
+        }
+        if before_events
+            .iter()
+            .any(|e| !e.detail.to_lowercase().contains("external code"))
+            || after_events
+                .iter()
+                .any(|e| !e.detail.to_lowercase().contains("external code"))
+        {
             continue;
         }
 
-        // Look for changed external call to and return from
-        if changed_call_return_slot.is_none() {
-            if diff_op.tag() != DiffTag::Replace {
-                unchanged_call_from_slot = None;
-                continue;
-            }
-            assert!(change_tuples_events.len() == 2);
-            let (befores, afters) = change_tuples_events.split_at_mut(1);
-            let (before_change_tag, before_events) = &mut befores[0];
-            let (after_change_tag, after_events) = &mut afters[0];
-            assert!(*before_change_tag == ChangeTag::Delete);
-            assert!(*after_change_tag == ChangeTag::Insert);
-            // Ensure events mention external call
-            if before_events.len() < 2 || after_events.len() < 2 {
-                unchanged_call_from_slot = None;
-                continue;
-            }
-            if before_events
-                .iter()
-                .any(|e| !e.detail.to_lowercase().contains("external code"))
-                || after_events
-                    .iter()
-                    .any(|e| !e.detail.to_lowercase().contains("external code"))
-            {
-                unchanged_call_from_slot = None;
-                continue;
-            }
-            changed_call_return_slot = Some(change_tuples_events);
+        // Look for unchanged call from just before changed events
+        // TODO: Retain parsed events for use here...?
+        let previous_before_event =
+            Event::parse(diff.before_lines[diff_op.old_range().start - 1]).unwrap();
+        let previous_after_event =
+            Event::parse(diff.after_lines[diff_op.new_range().start - 1]).unwrap();
+        if previous_before_event != previous_after_event {
+            continue;
         }
 
         // Extract related events
@@ -402,14 +384,12 @@ fn check_for_library_call_replaced(
         let mut related_after_events = vec![];
 
         {
-            let events = &mut unchanged_call_from_slot.unwrap()[0].1;
-            related_before_events.push(events.pop_front().unwrap());
-            related_after_events.push(related_before_events.last().unwrap().clone());
+            related_before_events.push(previous_before_event);
+            related_after_events.push(previous_after_event);
         }
 
         {
-            let tuples_events = changed_call_return_slot.unwrap();
-            let (befores, afters) = tuples_events.split_at_mut(1);
+            let (befores, afters) = change_tuples_events.split_at_mut(1);
             let (_, before_events) = &mut befores[0];
             let (_, after_events) = &mut afters[0];
             while !before_events.is_empty() {
@@ -426,9 +406,6 @@ fn check_for_library_call_replaced(
             related_after_events,
             diff_op,
         ));
-
-        unchanged_call_from_slot = None;
-        changed_call_return_slot = None;
     }
 
     divergences
@@ -593,7 +570,7 @@ fn check_for_known_divergences(
             }
         }
         {
-            let mut divergences_found = check_for_library_call_replaced(grouped_events);
+            let mut divergences_found = check_for_library_call_replaced(diff, grouped_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
                 continue;
@@ -988,6 +965,59 @@ mod tests {
             divergence.before_events[0].detail,
             "xstrdup_or_null at git-compat-util.h:1168:0"
         );
+    }
+
+    #[test]
+    fn library_call_replaced() {
+        // Example diff:
+        //   CF: strbuf_vaddf at strbuf.c:397:8
+        // <   CT: Jump to external code for ___vsnprintf_chk
+        // >   CT: Jump to external code for _vsnprintf
+        // <   RF: Jump to external code for ___vsnprintf_chk
+        // >   RF: Jump to external code for _vsnprintf
+        let diff = Diff {
+            before_lines: Vec::from([
+                "CF: strbuf_vaddf at strbuf.c:397:8",
+                "  CT: Jump to external code for ___vsnprintf_chk",
+                "  RF: Jump to external code for ___vsnprintf_chk",
+            ]),
+            after_lines: Vec::from([
+                "CF: strbuf_vaddf at strbuf.c:397:8",
+                "  CT: Jump to external code for _vsnprintf",
+                "  RF: Jump to external code for _vsnprintf",
+            ]),
+            grouped_diff_ops: Vec::from([Vec::from([DiffOp::Replace {
+                old_index: 1,
+                old_len: 2,
+                new_index: 1,
+                new_len: 2,
+            }])]),
+        };
+        let change_tuples_events = Vec::from([
+            (
+                ChangeTag::Delete,
+                diff.before_lines[1..]
+                    .iter()
+                    .map(|str| Event::parse(str).unwrap())
+                    .collect::<VecDeque<_>>(),
+            ),
+            (
+                ChangeTag::Insert,
+                diff.after_lines[1..]
+                    .iter()
+                    .map(|str| Event::parse(str).unwrap())
+                    .collect::<VecDeque<_>>(),
+            ),
+        ]);
+        let mut grouped_events = [(diff.grouped_diff_ops[0][0], change_tuples_events)];
+        let divergences = check_for_known_divergences(&diff, &mut grouped_events);
+        assert_eq!(divergences.len(), 1);
+        let divergence = &divergences[0];
+        assert_eq!(
+            divergence.divergence_type,
+            DivergenceType::LibraryCallReplaced
+        );
+        assert_eq!(divergence.before_events.len(), 3);
     }
 
     #[test]
