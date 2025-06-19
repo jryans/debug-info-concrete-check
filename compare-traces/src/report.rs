@@ -335,10 +335,10 @@ fn check_for_library_call_added(
 // TODO: Break this up into smaller functions
 // Example diff:
 //   CF: strbuf_vaddf at strbuf.c:397:8
-// < CT: Jump to external code for ___vsnprintf_chk
-// > CT: Jump to external code for _vsnprintf
-// < RF: Jump to external code for ___vsnprintf_chk
-// > RF: Jump to external code for _vsnprintf
+// <   CT: Jump to external code for ___vsnprintf_chk
+// >   CT: Jump to external code for _vsnprintf
+// <   RF: Jump to external code for ___vsnprintf_chk
+// >   RF: Jump to external code for _vsnprintf
 fn check_for_library_call_replaced(
     grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
 ) -> Vec<Divergence> {
