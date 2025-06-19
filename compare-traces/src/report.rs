@@ -375,7 +375,14 @@ fn check_for_library_call_replaced(
             Event::parse(diff.before_lines[diff_op.old_range().start - 1]).unwrap();
         let previous_after_event =
             Event::parse(diff.after_lines[diff_op.new_range().start - 1]).unwrap();
-        if previous_before_event != previous_after_event {
+        // Ensure at least the event type and function name matches
+        // (coordinate drift is ignored for this pattern)
+        if previous_before_event.event_type != EventType::CallFrom
+            || previous_after_event.event_type != EventType::CallFrom
+        {
+            continue;
+        }
+        if previous_before_event.location.function != previous_after_event.location.function {
             continue;
         }
 
