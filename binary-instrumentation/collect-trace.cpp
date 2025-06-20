@@ -378,13 +378,11 @@ void printCallFromEventForInlinedEntry(const DWARFDie &entry) {
                          EventSource::InlinedChain);
 }
 
-void printCallToEventForInlinedEntry(const DWARFDie &entry) {
-  assert(entry.getTag() == dwarf::Tag::DW_TAG_inlined_subroutine);
-
+void printCallToEventForEntry(const DWARFDie &entry) {
   DILineInfo lineInfo;
   lineInfo.FunctionName = entry.getShortName();
 
-  // Use decl. file and line from abstract origin entry
+  // Use decl. file and line from abstract origin entry when inlined
   lineInfo.FileName =
       entry.getDeclFile(DILineInfoSpecifier::FileLineInfoKind::RawValue);
   lineInfo.Line = entry.getDeclLine();
@@ -400,7 +398,7 @@ void printReturnFromEventForInlinedEntry(const DWARFDie &entry) {
   DILineInfo lineInfo;
   lineInfo.FunctionName = entry.getShortName();
 
-  // Use decl. file from abstract origin entry
+  // Use decl. file from abstract origin entry when inlined
   lineInfo.FileName =
       entry.getDeclFile(DILineInfoSpecifier::FileLineInfoKind::RawValue);
   // Function epilogue location not generally available when inlined
@@ -412,13 +410,14 @@ void printReturnFromEventForInlinedEntry(const DWARFDie &entry) {
                          EventSource::InlinedChain);
 }
 
-void pushStackFrame(const DWARFDie &entry) {
+void pushStackFrame(const DWARFDie &entry, EventSource eventSource) {
   stack.push_back(entry);
   if (verbose)
     *trace << "push\n";
   // Only non-inlined entries notify stack depth changes for event printing
   // Inlined chain processing handles printing all inlined entries when needed
-  if (!entry || entry.isSubprogramDIE())
+  if ((!entry || entry.isSubprogramDIE()) &&
+      eventSource != EventSource::InlinedChain)
     stackDepthChanged = true;
 }
 
@@ -539,6 +538,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
   }
 
   // If there are queued events, print them now
+  bool printedQueuedCallFromEvent = queuedCallFromEvent.has_value();
   printQueue();
 
   // Get the inlined chain for this address
@@ -590,7 +590,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       *trace << "Aligning inlined chain\n";
       *trace << "Oldest chain link: " << oldestChainLink.getShortName() << "\n";
     }
-    size_t stackIdxOldestChainLink = SIZE_MAX;
+    size_t stackIdxOldestChainLink = stack.size();
     for (size_t i = stack.size(); i--;) {
       const auto &entry = stack[i].entry;
       if (verbose)
@@ -602,7 +602,10 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     }
     // As long as the stack is not empty,
     // we should always find at least one chain link in the stack
-    assert(stackIdxOldestChainLink != SIZE_MAX);
+    // for statically known call targets.
+    // With dynamic call targets,
+    // the new frame(s) won't be connected to the caller,
+    // so we assume they should all be appended.
 
     // Pop any stack frames not found in the new inlined chain
     size_t chainIdxNewestMatchingStack = SIZE_MAX;
@@ -629,19 +632,32 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       popStackFrame(vm);
     }
     // From the alignment block above,
-    // we know there must be at least one chain link in the stack
-    assert(chainIdxNewestMatchingStack != SIZE_MAX);
+    // there _may_ be at least one chain link in the stack,
+    // but not always, e.g. with dynamic call targets
+    size_t chainIdxNewestBeyondStack = 0;
+    if (chainIdxNewestMatchingStack != SIZE_MAX) {
+      chainIdxNewestBeyondStack = chainIdxNewestMatchingStack + 1;
+    }
 
     // Push any new frames beyond what is already in the stack
     if (verbose)
       *trace << "Pushing any new frames\n";
-    for (size_t i = chainIdxNewestMatchingStack + 1; i < newChainSize; ++i) {
+    for (size_t i = chainIdxNewestBeyondStack; i < newChainSize; ++i) {
       // Print call frame info _before_ pushing, since simulated call would
       // have occurred in frame before the one being pushed
       const auto &entry = inlinedChain[i];
-      printCallFromEventForInlinedEntry(entry);
-      pushStackFrame(entry);
-      printCallToEventForInlinedEntry(entry);
+      if (entry.isSubprogramDIE()) {
+        // For the dynamic call target case,
+        // the first new frame will be a regular subprogram,
+        // and we should have already printed it
+        assert(printedQueuedCallFromEvent);
+        // Clear that state now, as it's only valid for the first frame
+        printedQueuedCallFromEvent = false;
+      } else {
+        printCallFromEventForInlinedEntry(entry);
+      }
+      pushStackFrame(entry, EventSource::InlinedChain);
+      printCallToEventForEntry(entry);
     }
 
     // Store chain to check for changes with next instruction
@@ -754,10 +770,14 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
   if (currInstIsCall || currInstIsTailCall) {
     // If the inlined chain is empty (implying no debug info for this address),
     // we still push an (empty) entry to record the stack depth change.
-    if (!inlinedChain.empty())
-      pushStackFrame(inlinedChain.back());
-    else
-      pushStackFrame(DWARFDie());
+    if (!inlinedChain.empty()) {
+      // Only push here for normal stack movements.
+      // Multiple frames of inlined chain changes are handled separately.
+      if (inlinedChain.size() == 1)
+        pushStackFrame(inlinedChain.back(), EventSource::Stack);
+    } else {
+      pushStackFrame(DWARFDie(), EventSource::Stack);
+    }
     // Capture the first address encountered in the callee's frame
     stack.back().callToAddress = nextAddress;
 
@@ -985,7 +1005,7 @@ int qbdipreload_on_run(QBDI::VMInstanceRef vm, QBDI::rword start,
   // Initialise stack with frame for `main`
   getInlinedChain(mainFunc, inlinedChain);
   assert(!inlinedChain.empty());
-  pushStackFrame(inlinedChain.back());
+  pushStackFrame(inlinedChain.back(), EventSource::Stack);
 
   // Log initial instruction
   const auto lineInfo = dwarfCtx->getLineInfoForAddress(
