@@ -601,10 +601,12 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       break;
     }
     // As long as the stack is not empty,
-    // we should always find at least one chain link in the stack
-    // for statically known call targets.
-    // With dynamic call targets,
-    // the new frame(s) won't be connected to the caller,
+    // we should always find at least one chain link in the stack,
+    // as each out-of-line call target usually has at least one instruction
+    // as "itself" before any inlined regions begin.
+    // It isn't required however, as it's possible to out-of-line call
+    // into a function which immediately enters an inlined region.
+    // In these scenarios, the new frame(s) won't be connected to the caller,
     // so we assume they should all be appended.
 
     // Pop any stack frames not found in the new inlined chain
@@ -633,7 +635,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     }
     // From the alignment block above,
     // there _may_ be at least one chain link in the stack,
-    // but not always, e.g. with dynamic call targets
+    // but not always
     size_t chainIdxNewestBeyondStack = 0;
     if (chainIdxNewestMatchingStack != SIZE_MAX) {
       chainIdxNewestBeyondStack = chainIdxNewestMatchingStack + 1;
@@ -647,7 +649,8 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       // have occurred in frame before the one being pushed
       const auto &entry = inlinedChain[i];
       if (entry.isSubprogramDIE()) {
-        // For the dynamic call target case,
+        // For the case of an out-of-line call target
+        // that immediately enters an inlining region,
         // the first new frame will be a regular subprogram,
         // and we should have already printed it
         assert(printedQueuedCallFromEvent);
