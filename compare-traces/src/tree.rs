@@ -585,7 +585,7 @@ pub enum TreeEditOp {
 }
 
 impl TreeEditOp {
-    fn to_diff_ops(&self, before_tree: &Tree) -> Vec<DiffOp> {
+    fn to_diff_ops(&self, before_tree: &Tree, after_tree: &Tree) -> Vec<DiffOp> {
         match self {
             TreeEditOp::Add {
                 parent_index,
@@ -634,12 +634,14 @@ impl TreeEditOp {
                 after_index,
                 ..
             } => {
-                let node = &before_tree[before_index];
-                let subtree_len = node.dfs_pre_order(before_tree).count();
+                let before_node = &before_tree[before_index];
+                let before_subtree_len = before_node.dfs_pre_order(before_tree).count();
+                let after_node = &after_tree[after_index];
+                let after_subtree_len = after_node.dfs_pre_order(after_tree).count();
                 vec![
                     DiffOp::Delete {
                         old_index: before_index.unwrap(),
-                        old_len: subtree_len,
+                        old_len: before_subtree_len,
                         new_index: {
                             // JRS: Not sure if we actually use this...?
                             // Let's force this to 0 for now...
@@ -653,7 +655,7 @@ impl TreeEditOp {
                             0
                         },
                         new_index: after_index.unwrap(),
-                        new_len: subtree_len,
+                        new_len: after_subtree_len,
                     },
                 ]
             }
@@ -1410,7 +1412,7 @@ pub fn diff_tree<'content>(
     // Convert edit ops to grouped diff ops
     let mut grouped_diff_ops: Vec<Vec<DiffOp>> = edit_ops
         .iter()
-        .map(|edit_op| edit_op.to_diff_ops(&before_tree))
+        .map(|edit_op| edit_op.to_diff_ops(&before_tree, &after_tree))
         .collect();
     compact_diff_ops(&mut grouped_diff_ops);
 
