@@ -1230,7 +1230,7 @@ pub fn diff_tree<'content>(
     before_content: &'content str,
     after_content: &'content str,
 ) -> TreeDiff<'content> {
-    let before_lines: Vec<_> = before_content.lines().collect();
+    let mut before_lines: Vec<_> = before_content.lines().collect();
     let after_lines: Vec<_> = after_content.lines().collect();
 
     // Parse lines into fuzzy events
@@ -1340,6 +1340,7 @@ pub fn diff_tree<'content>(
             };
             // Add to the before tree
             let before_tree_position = before_events.len();
+            before_lines.push(after_node.data(&after_lines).clone());
             before_events.push(after_node.data(&after_events).clone());
             // JRS: This might not be correct...
             before_labels.push(after_node.data(&after_labels).clone());
