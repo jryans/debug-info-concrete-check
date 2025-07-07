@@ -714,49 +714,77 @@ pub struct TreeDiff<'content> {
 #[derive(Clone, Debug)]
 struct FuzzyEvent(Event);
 
-impl PartialEq for FuzzyEvent {
-    fn eq(&self, other: &Self) -> bool {
-        if self.0 == other.0 {
+impl FuzzyEvent {
+    fn attach_partner(&mut self, partner: &Self) {
+        self.0.attach_partner(&partner.0);
+    }
+
+    fn self_eq(a: &Event, b: &Event) -> bool {
+        if a == b {
             return true;
         }
 
-        if self.0.event_type != other.0.event_type {
+        if a.event_type != b.event_type {
             return false;
         }
 
-        let self_loc = &self.0.location;
-        let other_loc = &other.0.location;
+        let a_loc = &a.location;
+        let b_loc = &b.location;
 
-        if self_loc.function.is_some()
-            && self_loc.file.is_none()
-            && other_loc.function.is_some()
-            && other_loc.file.is_none()
+        if a_loc.function.is_some()
+            && a_loc.file.is_none()
+            && b_loc.function.is_some()
+            && b_loc.file.is_none()
         {
             // Most likely an external code event
             // Allow some function name edits to detect call replacement
             return normalized_levenshtein(
-                self_loc.function.as_ref().unwrap(),
-                other_loc.function.as_ref().unwrap(),
+                a_loc.function.as_ref().unwrap(),
+                b_loc.function.as_ref().unwrap(),
             ) >= 0.5;
         }
 
-        if self_loc.function != other_loc.function || self_loc.file != other_loc.file {
+        if a_loc.function != b_loc.function || a_loc.file != b_loc.file {
             return false;
         }
 
-        if self_loc.line.is_some() != other_loc.line.is_some() {
+        if a_loc.line.is_some() != b_loc.line.is_some() {
             return false;
         }
-        if self_loc.line.is_none() && other_loc.line.is_none() {
+        if a_loc.line.is_none() && b_loc.line.is_none() {
             return true;
         }
-        let self_line = self_loc.line.unwrap();
-        let other_line = other_loc.line.unwrap();
-        if self_line == 0 || other_line == 0 {
+        let a_line = a_loc.line.unwrap();
+        let b_line = b_loc.line.unwrap();
+        if a_line == 0 || b_line == 0 {
             return true;
         }
-        if self_line.abs_diff(other_line) > 3 {
+        if a_line.abs_diff(b_line) > 3 {
             return false;
+        }
+
+        true
+    }
+}
+
+impl PartialEq for FuzzyEvent {
+    fn eq(&self, other: &Self) -> bool {
+        if !FuzzyEvent::self_eq(&self.0, &other.0) {
+            return false;
+        }
+
+        // JRS: Doesn't feel right to repeat this here,
+        // partner check should be generic across event kind somehow
+        if self.0.partner.is_some() != other.0.partner.is_some() {
+            return false;
+        }
+
+        if self.0.partner.is_some() {
+            let self_partner = self.0.partner.as_ref().unwrap();
+            let other_partner = other.0.partner.as_ref().unwrap();
+            if !FuzzyEvent::self_eq(self_partner, other_partner) {
+                return false;
+            }
         }
 
         true
@@ -1238,10 +1266,25 @@ pub fn diff_tree<'content>(
         .iter()
         .map(|line| FuzzyEvent(Event::parse(line).unwrap()))
         .collect();
-    let after_events: Vec<_> = after_lines
+    let mut after_events: Vec<_> = after_lines
         .iter()
         .map(|line| FuzzyEvent(Event::parse(line).unwrap()))
         .collect();
+
+    // Attach partner events
+    // JRS: Do we need to attach partners when applying add operations...?
+    for i in 0..(before_events.len() - 1) {
+        let (left, right) = before_events.split_at_mut(i + 1);
+        let a = left.last_mut().unwrap();
+        let b = right.first().unwrap();
+        a.attach_partner(b);
+    }
+    for i in 0..(after_events.len() - 1) {
+        let (left, right) = after_events.split_at_mut(i + 1);
+        let a = left.last_mut().unwrap();
+        let b = right.first().unwrap();
+        a.attach_partner(b);
+    }
 
     // Convert lines into trees
     // JRS: Do we want to save a copy of the before tree without edits...?
@@ -1275,10 +1318,10 @@ pub fn diff_tree<'content>(
             // Match exists, check if replacements or moves are needed
             let before_index = matching.get_by_right(after_index).unwrap();
             let before_node = &before_tree[before_index];
-            // Compare events without fuzzy wrapper
+            // Compare events without fuzzy wrappers and partners
             let before_event = before_node.data(&before_events);
             let after_event = after_node.data(&after_events);
-            if before_event.as_event() != after_event.as_event() {
+            if !Event::self_eq(before_event.as_event(), after_event.as_event()) {
                 let op = TreeEditOp::Replace {
                     before_index: *before_index,
                     after_index: *after_index,
@@ -1676,6 +1719,17 @@ CF: system_path at exec-cmd.c:265:6
         assert_eq!(event_1, event_2);
         let event_3 = FuzzyEvent(Event::parse("CT: Jump to external code for pomelo").unwrap());
         assert_ne!(event_1, event_3);
+    }
+
+    #[test]
+    fn tree_fuzzy_ne_partner() {
+        let mut event_1 = FuzzyEvent(Event::parse("CF: system_path at exec-cmd.c:265:6").unwrap());
+        let event_1p = FuzzyEvent(Event::parse("CT: foo at foo.c:0:0").unwrap());
+        event_1.attach_partner(&event_1p);
+        let mut event_2 = FuzzyEvent(Event::parse("CF: system_path at exec-cmd.c:265:6").unwrap());
+        let event_2p = FuzzyEvent(Event::parse("CT: bob at bob.c:0:0").unwrap());
+        event_2.attach_partner(&event_2p);
+        assert_ne!(event_1, event_2);
     }
 
     #[test]

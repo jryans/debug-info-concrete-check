@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, hash::Hash};
 
 use anyhow::{anyhow, Ok, Result};
 use once_cell::sync::Lazy;
@@ -40,12 +40,13 @@ pub struct Location {
     pub column: Option<u64>,
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Event {
     pub event_type: EventType,
     // TODO: Maybe store reference instead...?
     pub detail: String,
     pub location: Location,
+    pub partner: Option<Box<Event>>,
 }
 
 impl Event {
@@ -117,7 +118,67 @@ impl Event {
                 line,
                 column,
             },
+            partner: None,
         })
+    }
+
+    fn data(&self) -> (&EventType, &String, &Location) {
+        (&self.event_type, &self.detail, &self.location)
+    }
+
+    pub fn self_eq(a: &Event, b: &Event) -> bool {
+        a.data() == b.data()
+    }
+
+    pub fn attach_partner(&mut self, partner: &Self) {
+        // JRS: Should we attach partners in both directions...?
+        if self.event_type != EventType::CallFrom {
+            return;
+        }
+
+        if partner.event_type != EventType::CallTo {
+            return;
+        }
+
+        self.partner = Some(Box::new(partner.clone()));
+    }
+}
+
+impl PartialEq for Event {
+    // JRS: Maybe lift this up to `Eventable` to make it generic...?
+    fn eq(&self, other: &Self) -> bool {
+        if !Event::self_eq(self, other) {
+            return false;
+        }
+
+        if self.partner.is_some() != other.partner.is_some() {
+            return false;
+        }
+
+        if self.partner.is_some() {
+            let self_partner = self.partner.as_ref().unwrap();
+            let other_partner = other.partner.as_ref().unwrap();
+            if !Event::self_eq(self_partner, other_partner) {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+impl Eq for Event {}
+
+impl PartialOrd for Event {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Event {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.data().cmp(&other.data())
+        // JRS: Do we want to also check the partner here...?
     }
 }
 
