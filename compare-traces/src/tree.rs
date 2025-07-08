@@ -758,17 +758,6 @@ impl FuzzyEvent {
         if a_loc.line.is_some() != b_loc.line.is_some() {
             return false;
         }
-        if a_loc.line.is_none() && b_loc.line.is_none() {
-            return true;
-        }
-        let a_line = a_loc.line.unwrap();
-        let b_line = b_loc.line.unwrap();
-        if a_line == 0 || b_line == 0 {
-            return true;
-        }
-        if a_line.abs_diff(b_line) > 3 {
-            return false;
-        }
 
         true
     }
@@ -1718,7 +1707,10 @@ CF: system_path at exec-cmd.c:265:6
             tree_items_subset_lcs(&tree_1, &tree_2, &events_1, &events_2, &leaves_1, &leaves_2);
         assert_eq!(
             leaves_lcs.matched,
-            vec![(TreeNodeIndex::Node(1), TreeNodeIndex::Node(1))]
+            vec![
+                (TreeNodeIndex::Node(1), TreeNodeIndex::Node(1)),
+                (TreeNodeIndex::Node(2), TreeNodeIndex::Node(2)),
+            ]
         );
     }
 
@@ -2099,9 +2091,9 @@ CF: strbuf_vaddf at strbuf.c:397:8
         // incidentally means some root-level call from events
         // became non-matching, which revealed the hidden root node
         // was not in the matching bimap.
-        // This test may soon be of less use if e.g. equality is relaxed
-        // to permit large coordinate changes, as presumably the
-        // root-level nodes here can then be reused.
+        // This test then quickly became of less use because equality was relaxed
+        // to permit large coordinate changes, which allows the
+        // root-level nodes here to be reused.
         let before_content = "
 CF: main at ffmpeg.c:4521:5
   CT: init_dynload at cmdutils.c:78:0
@@ -2115,59 +2107,19 @@ CF: main at ffmpeg.c:4521:5
         let diff = diff_tree(before_content, after_content);
         assert_eq!(
             diff.edit_ops,
-            vec![
-                TreeEditOp::Add {
-                    parent_index: TreeNodeIndex::Root,
-                    child_position: 0,
-                    after_index: TreeNodeIndex::Node(0)
-                },
-                TreeEditOp::Add {
-                    parent_index: TreeNodeIndex::Node(3),
-                    child_position: 0,
-                    after_index: TreeNodeIndex::Node(1)
-                },
-                TreeEditOp::Move {
-                    before_index: TreeNodeIndex::Node(2),
-                    parent_index: TreeNodeIndex::Node(3),
-                    child_position: 0,
-                    after_index: TreeNodeIndex::Node(2)
-                },
-                TreeEditOp::Remove {
-                    before_index: TreeNodeIndex::Node(0)
-                }
-            ]
+            vec![TreeEditOp::Replace {
+                before_index: TreeNodeIndex::Node(1),
+                after_index: TreeNodeIndex::Node(1),
+            }]
         );
         assert_eq!(
             diff.grouped_diff_ops,
-            vec![
-                vec![DiffOp::Insert {
-                    old_index: 0,
-                    new_index: 0,
-                    new_len: 1
-                }],
-                vec![DiffOp::Insert {
-                    old_index: 0,
-                    new_index: 1,
-                    new_len: 1
-                }],
-                vec![
-                    DiffOp::Delete {
-                        old_index: 2,
-                        old_len: 1,
-                        new_index: 0
-                    },
-                    DiffOp::Insert {
-                        old_index: 0,
-                        new_index: 2,
-                        new_len: 1
-                    }
-                ],
-                vec![DiffOp::Delete {
-                    old_index: 0,
-                    old_len: 2,
-                    new_index: 0
-                }]
-            ]
+            vec![vec![DiffOp::Replace {
+                old_index: 1,
+                old_len: 1,
+                new_index: 1,
+                new_len: 1,
+            }]]
         );
     }
 }
