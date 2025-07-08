@@ -24,6 +24,13 @@ impl TreeNodeIndex {
             TreeNodeIndex::Root => panic!("Called `TreeNodeIndex::unwrap` on `Root`"),
         }
     }
+
+    fn is_root(&self) -> bool {
+        match self {
+            TreeNodeIndex::Node(_) => false,
+            TreeNodeIndex::Root => true,
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -294,7 +301,7 @@ impl<'tree> Iterator for TreeBfs<'tree> {
                     self.queue.push_front(node.child(&self.tree, i).unwrap());
                 }
                 // For all non-root branches, stop here for now
-                if let TreeNodeIndex::Root = node.index {
+                if node.index.is_root() {
                     continue;
                 }
                 return Some(node);
@@ -330,7 +337,7 @@ impl<'tree> Iterator for TreeDfsPreOrder<'tree> {
                     self.stack.push(node.child(&self.tree, i).unwrap());
                 }
                 // For all non-root branches, stop here for now
-                if let TreeNodeIndex::Root = node.index {
+                if node.index.is_root() {
                     continue;
                 }
                 return Some(node);
@@ -365,7 +372,7 @@ impl<'tree> Iterator for TreeDfsPostOrder<'tree> {
                 // If `node` is a branch, first check if we've seen it before
                 if self.visited.contains(&node.index) {
                     // For all non-root branches, stop here for now
-                    if let TreeNodeIndex::Root = node.index {
+                    if node.index.is_root() {
                         continue;
                     }
                     return Some(node);
@@ -1029,6 +1036,9 @@ where
         // Add these branches to the visited set
         before_visited.extend(before_branches);
     }
+
+    // Roots are assumed to match by design
+    matching.insert(Tree::root_index(), Tree::root_index());
 
     matching
 }
@@ -1801,14 +1811,16 @@ D
         let labels_1 = vec![0, 1, 2, 2, 2, 1, 2, 2, 1, 2];
         let labels_2 = vec![0, 1, 2, 2, 1, 2, 1, 2, 2, 2];
         let matching = matching_bimap(&tree_1, &tree_2, &items_1, &items_2, &labels_1, &labels_2);
-        assert_eq!(matching.len(), 9);
+        assert_eq!(matching.len(), 10); // Actual nodes plus implicit root
         let mut items_1_matched: Vec<&str> = matching
             .left_values()
+            .filter(|index| !index.is_root())
             .map(|index| tree_1[&index].data(&items_1).trim())
             .collect();
         items_1_matched.sort();
         let mut items_2_matched: Vec<&str> = matching
             .right_values()
+            .filter(|index| !index.is_root())
             .map(|index| tree_2[&index].data(&items_2).trim())
             .collect();
         items_2_matched.sort();
@@ -1846,7 +1858,7 @@ D
         let labels_1 = vec![0, 1, 1, 1, 1, 1];
         let labels_2 = vec![0, 1, 1, 1, 1, 1];
         let matching = matching_bimap(&tree_1, &tree_2, &items_1, &items_2, &labels_1, &labels_2);
-        assert_eq!(matching.len(), 6);
+        assert_eq!(matching.len(), 7); // Actual nodes plus implicit root
         let ops = align_children(
             &mut tree_1,
             &tree_2,
@@ -2077,6 +2089,85 @@ CF: strbuf_vaddf at strbuf.c:397:8
                 new_index: 1,
                 new_len: 2,
             }]]
+        );
+    }
+
+    #[test]
+    fn root_parent_findable() {
+        // Adding call to partners to call from events
+        // and checking them as part of equality
+        // incidentally means some root-level call from events
+        // became non-matching, which revealed the hidden root node
+        // was not in the matching bimap.
+        // This test may soon be of less use if e.g. equality is relaxed
+        // to permit large coordinate changes, as presumably the
+        // root-level nodes here can then be reused.
+        let before_content = "
+CF: main at ffmpeg.c:4521:5
+  CT: init_dynload at cmdutils.c:78:0
+  RF: init_dynload at cmdutils.c:84:1"
+            .trim();
+        let after_content = "
+CF: main at ffmpeg.c:4521:5
+  CT: init_dynload at cmdutils.c:84:1
+  RF: init_dynload at cmdutils.c:84:1"
+            .trim();
+        let diff = diff_tree(before_content, after_content);
+        assert_eq!(
+            diff.edit_ops,
+            vec![
+                TreeEditOp::Add {
+                    parent_index: TreeNodeIndex::Root,
+                    child_position: 0,
+                    after_index: TreeNodeIndex::Node(0)
+                },
+                TreeEditOp::Add {
+                    parent_index: TreeNodeIndex::Node(3),
+                    child_position: 0,
+                    after_index: TreeNodeIndex::Node(1)
+                },
+                TreeEditOp::Move {
+                    before_index: TreeNodeIndex::Node(2),
+                    parent_index: TreeNodeIndex::Node(3),
+                    child_position: 0,
+                    after_index: TreeNodeIndex::Node(2)
+                },
+                TreeEditOp::Remove {
+                    before_index: TreeNodeIndex::Node(0)
+                }
+            ]
+        );
+        assert_eq!(
+            diff.grouped_diff_ops,
+            vec![
+                vec![DiffOp::Insert {
+                    old_index: 0,
+                    new_index: 0,
+                    new_len: 1
+                }],
+                vec![DiffOp::Insert {
+                    old_index: 0,
+                    new_index: 1,
+                    new_len: 1
+                }],
+                vec![
+                    DiffOp::Delete {
+                        old_index: 2,
+                        old_len: 1,
+                        new_index: 0
+                    },
+                    DiffOp::Insert {
+                        old_index: 0,
+                        new_index: 2,
+                        new_len: 1
+                    }
+                ],
+                vec![DiffOp::Delete {
+                    old_index: 0,
+                    old_len: 2,
+                    new_index: 0
+                }]
+            ]
         );
     }
 }
