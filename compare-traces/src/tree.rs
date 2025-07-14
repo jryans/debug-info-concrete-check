@@ -2122,4 +2122,76 @@ CF: main at ffmpeg.c:4521:5
             }]]
         );
     }
+
+    #[test]
+    fn uncategorised_ex1() {
+        // From `git/program/clang/13/O1/divergences/t1007-hash-object`
+        // Uncategorised
+        //   After events:
+        //     CF: _ at gettext.h:48:9
+        //   Occurrences: 4
+        //   Example trace lines: -1, +304078
+        // Individual small replacements, seems like ideal diff output
+        let before_content = "
+CF: error_builtin at usage.c:81:11
+  CT: _ at gettext.h:45:0
+  CF: _ at gettext.h:48:9
+    CT: Jump to external code for gettext
+    RF: Jump to external code for gettext
+  RF: _ at gettext.h:49:1"
+            .trim();
+        let after_content = "
+ICF: error_builtin at usage.c:81:11
+  ICT: _ at gettext.h:44:0
+  CF: _ at gettext.h:48:9
+    CT: Jump to external code for dcgettext
+    RF: Jump to external code for dcgettext
+  IRF: _ at gettext.h:0:0"
+            .trim();
+        let diff = diff_tree(before_content, after_content);
+        assert_eq!(
+            diff.edit_ops,
+            vec![
+                TreeEditOp::Replace {
+                    before_index: TreeNodeIndex::Node(1),
+                    after_index: TreeNodeIndex::Node(1)
+                },
+                TreeEditOp::Replace {
+                    before_index: TreeNodeIndex::Node(5),
+                    after_index: TreeNodeIndex::Node(5)
+                },
+                TreeEditOp::Replace {
+                    before_index: TreeNodeIndex::Node(3),
+                    after_index: TreeNodeIndex::Node(3)
+                },
+                TreeEditOp::Replace {
+                    before_index: TreeNodeIndex::Node(4),
+                    after_index: TreeNodeIndex::Node(4)
+                }
+            ]
+        );
+        assert_eq!(
+            diff.grouped_diff_ops,
+            vec![
+                vec![DiffOp::Replace {
+                    old_index: 1,
+                    old_len: 1,
+                    new_index: 1,
+                    new_len: 1
+                }],
+                vec![DiffOp::Replace {
+                    old_index: 5,
+                    old_len: 1,
+                    new_index: 5,
+                    new_len: 1
+                }],
+                vec![DiffOp::Replace {
+                    old_index: 3,
+                    old_len: 2,
+                    new_index: 3,
+                    new_len: 2
+                }]
+            ]
+        );
+    }
 }
