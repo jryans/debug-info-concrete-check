@@ -695,10 +695,10 @@ pub fn analyse_and_print_report(
 
     for op_group in &diff.grouped_diff_ops {
         if log_enabled!(log::Level::Debug) {
+            println!("{:#?}", &op_group);
+            println!();
             print_change_group(diff, &op_group);
             println!();
-            // println!("{:#?}", &op_group);
-            // println!();
         }
 
         let mut grouped_events: Vec<(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)> = vec![];
