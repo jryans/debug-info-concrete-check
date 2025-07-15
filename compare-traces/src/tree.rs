@@ -641,6 +641,9 @@ impl TreeEditOp {
                 after_index,
                 ..
             } => {
+                // JRS: Viewing a move as if it were a text diff is more noise than signal...
+                // Divergence reporting then thinks all nested lines have changed.
+                // We should instead think of these explicitly in tree edit terms.
                 let before_node = &before_tree[before_index];
                 let before_subtree_len = before_node.dfs_pre_order(before_tree).count();
                 let after_node = &after_tree[after_index];
@@ -1455,6 +1458,10 @@ pub fn diff_tree<'content>(
     // Convert edit ops to grouped diff ops
     let mut grouped_diff_ops: Vec<Vec<DiffOp>> = edit_ops
         .iter()
+        // JRS: Divergence reporting is not move-aware yet,
+        // and converting moves to text diffs creates too much noise,
+        // so for now we filter them out
+        .filter(|edit_op| !matches!(edit_op, TreeEditOp::Move { .. }))
         .map(|edit_op| edit_op.to_diff_ops(&before_tree, &after_tree))
         .collect();
     compact_diff_ops(&mut grouped_diff_ops);
@@ -1938,18 +1945,6 @@ CF: D at file.tex
         assert_eq!(
             diff.grouped_diff_ops,
             vec![
-                vec![
-                    DiffOp::Delete {
-                        old_index: 8,
-                        old_len: 2,
-                        new_index: 0,
-                    },
-                    DiffOp::Insert {
-                        old_index: 0,
-                        new_index: 4,
-                        new_len: 2,
-                    }
-                ],
                 vec![DiffOp::Insert {
                     old_index: 0,
                     new_index: 9,
