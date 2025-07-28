@@ -1007,7 +1007,11 @@ int qbdipreload_on_run(QBDI::VMInstanceRef vm, QBDI::rword start,
 
   // Initialise stack with frame for `main`
   getInlinedChain(mainFunc, inlinedChain);
-  assert(!inlinedChain.empty());
+  if (inlinedChain.empty()) {
+    errs() << "Error: No debug info for `main` (" << format_hex(mainFunc, 18)
+           << ")\n";
+    return QBDIPRELOAD_ERR_STARTUP_FAILED;
+  }
   pushStackFrame(inlinedChain.back(), EventSource::Stack);
 
   // Log initial instruction
