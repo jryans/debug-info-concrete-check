@@ -314,8 +314,13 @@ void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
   if (lineInfo) {
     eventStream << lineInfo.FunctionName;
     if (address && verbose) {
-      const auto functionOffset = *address - *lineInfo.StartAddress;
-      eventStream << " + " << format_hex(functionOffset, 6);
+      const auto functionOffset = (uint64_t)std::abs(
+          (int64_t)*address - (int64_t)*lineInfo.StartAddress);
+      if (*address < *lineInfo.StartAddress)
+        eventStream << " - ";
+      else
+        eventStream << " + ";
+      eventStream << format_hex(functionOffset, 6);
     }
     eventStream << " at " << lineInfo.FileName;
     if (isLocationPrintable(type))
