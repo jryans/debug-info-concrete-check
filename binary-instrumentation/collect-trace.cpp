@@ -568,8 +568,9 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
   // TODO: Adjust this logic for multiple active inlined chains
   if (verbose) {
     *trace << "Inlined chain:\n";
-    for (const auto &entry : inlinedChain) {
-      *trace << entry.getShortName() << "\n";
+    for (size_t i = inlinedChain.size(); i--;) {
+      *trace << "inlinedChain[" << i << "]: " << inlinedChain[i].getShortName()
+             << "\n";
     }
   }
   if (!inlinedChain.empty() && prevInlinedChain != inlinedChain) {
