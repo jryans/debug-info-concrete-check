@@ -73,10 +73,12 @@ std::vector<QBDI::MemoryMap> currentModuleMemoryMaps;
 // to post-instruction hook.
 
 bool currInstIsCall = false;
+bool currInstMayBeTailCall = false;
 bool currInstIsTailCall = false;
 bool currInstIsBranch = false;
 bool currInstIsReturn = false;
 QBDI::rword prevCallReturnTarget = 0;
+QBDI::rword nextAddressAfterCurrInst = 0;
 
 SmallVector<DWARFDie, 4> inlinedChain;
 SmallVector<DWARFDie, 4> prevInlinedChain;
@@ -539,9 +541,12 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
   // in the post-instruction hook. Should we do that instead of shared state...?
   currInstIsCall = instAnalysis->isCall;
   // Tail call status discovered in several places across both hooks
+  currInstMayBeTailCall = false;
   currInstIsTailCall = false;
   currInstIsBranch = instAnalysis->isBranch;
   currInstIsReturn = instAnalysis->isReturn;
+  // Possible next instruction address, assuming we continue on without jumping
+  nextAddressAfterCurrInst = address + instSize;
 
   // Print address and disassembly in verbose mode for trace debugging
   if (verbose) {
@@ -721,8 +726,9 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     const bool attrFound = callSite.find(dwarf::DW_AT_call_tail_call) ||
                            callSite.find(dwarf::DW_AT_GNU_tail_call);
     if (attrFound) {
-      // Stack marked as artificial in post-instruction hook
-      currInstIsTailCall = true;
+      // Post-instruction hook will check whether we actually jumped
+      // (in case of a conditional jump)
+      currInstMayBeTailCall = true;
     }
   }
 
@@ -761,6 +767,11 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
                                 QBDI::GPRState *gprState,
                                 QBDI::FPRState *fprState, void *data) {
   const auto &nextAddress = gprState->rip;
+
+  // If the currently analysed instruction may be a tail call according to
+  // debug info, use the next instruction's address to check if we jumped
+  if (currInstMayBeTailCall && nextAddress != nextAddressAfterCurrInst)
+    currInstIsTailCall = true;
 
   // If the currently analysed instruction is a call or branch,
   // use the next instruction's address to check if we moved to external code
