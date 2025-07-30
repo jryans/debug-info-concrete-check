@@ -104,7 +104,8 @@ void printQueue() {
 }
 
 struct StackFrame {
-  StackFrame(DWARFDie entry) : entry(entry) {}
+  StackFrame(DWARFDie entry, bool isInlined)
+      : entry(entry), isInlined(isInlined) {}
 
   DWARFDie entry;
 
@@ -116,6 +117,12 @@ struct StackFrame {
   // When a return instruction is encountered, it will pop the current frame and
   // any adjacent artificial frames (as we must assume they are now gone).
   bool isArtificial = false;
+
+  // Tracks frames which are inlined into their caller. This inlined status
+  // assists with the above artificial marking for tail frames.
+  // In particular, a tail call that occurs during an inlined frame marks the
+  // nearest native / non-inlined frame as artificial.
+  bool isInlined = false;
 
   // The first address we encountered when calling into this frame.
   QBDI::rword callToAddress;
@@ -432,7 +439,10 @@ void printReturnFromEventForInlinedEntry(const DWARFDie &entry) {
 }
 
 void pushStackFrame(const DWARFDie &entry, EventSource eventSource) {
-  stack.push_back(entry);
+  bool isInlined = false;
+  if (entry && entry.getTag() == dwarf::Tag::DW_TAG_inlined_subroutine)
+    isInlined = true;
+  stack.emplace_back(entry, isInlined);
   if (verbose)
     *trace << "Push stack[" << stack.size() - 1
            << "]: " << stack.back().getName() << "\n";
@@ -463,6 +473,9 @@ void popStackFrame(const QBDI::VMInstanceRef &vm) {
 
     const auto &frame = stack.back();
     const auto &entry = frame.entry;
+
+    // Artificial frames should only be native frames, not inlined frames
+    assert(!frame.isInlined);
 
     bool frameIsBranchToExternal = false;
     DILineInfo lineInfo;
@@ -653,9 +666,19 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
         chainIdxNewestMatchingStack = i;
         break;
       }
+      assert(stack.back().isInlined);
       printReturnFromEventForInlinedEntry(stack.back().entry);
-      // JRS: Not sure yet if inline-pop should also pop artificial frames...
+      // May also pop lurking artificial frames from past tail calls,
+      // so we adjust loop iteration as needed
+      size_t stackSizeBefore = stack.size();
       popStackFrame(vm);
+      size_t extraStackFramesPopped = stackSizeBefore - stack.size() - 1;
+      if (extraStackFramesPopped) {
+        if (verbose)
+          *trace << extraStackFramesPopped
+                 << " extra stack frames popped, adjusting iteration\n";
+        i -= extraStackFramesPopped;
+      }
     }
     // From the alignment block above,
     // there _may_ be at least one chain link in the stack,
@@ -783,8 +806,22 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
   if (currInstIsTailCall) {
     if (verbose)
       *trace << "Branch is a tail call\n";
-    // Current frame becomes artificial after tail call
-    stack.back().isArtificial = true;
+    // Current frame (or nearest native / non-inlined frame)
+    // becomes artificial after tail call
+    for (size_t i = stack.size(); i--;) {
+      auto &frame = stack[i];
+      if (frame.isInlined) {
+        if (verbose)
+          *trace << "stack[" << i << "]: " << frame.getName()
+                 << " is inlined, checking next frame\n";
+        continue;
+      }
+      frame.isArtificial = true;
+      if (verbose)
+        *trace << "stack[" << i << "]: " << frame.getName()
+               << " marked as artificial\n";
+      break;
+    }
   }
 
   // We now know (as best we can) if a branch is or is not a tail call,
