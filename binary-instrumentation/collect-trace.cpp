@@ -119,6 +119,12 @@ struct StackFrame {
 
   // The first address we encountered when calling into this frame.
   QBDI::rword callToAddress;
+
+  std::string getName() {
+    if (entry)
+      return entry.getShortName();
+    return "<unknown>";
+  }
 };
 
 // Newest frames are at the end of the stack vector
@@ -428,7 +434,8 @@ void printReturnFromEventForInlinedEntry(const DWARFDie &entry) {
 void pushStackFrame(const DWARFDie &entry, EventSource eventSource) {
   stack.push_back(entry);
   if (verbose)
-    *trace << "push\n";
+    *trace << "Push stack[" << stack.size() - 1
+           << "]: " << stack.back().getName() << "\n";
   // Only non-inlined entries notify stack depth changes for event printing
   // Inlined chain processing handles printing all inlined entries when needed
   if ((!entry || entry.isSubprogramDIE()) &&
@@ -438,9 +445,10 @@ void pushStackFrame(const DWARFDie &entry, EventSource eventSource) {
 
 void popStackFrame(const QBDI::VMInstanceRef &vm) {
   if (!stack.empty()) {
-    stack.pop_back();
     if (verbose)
-      *trace << "pop\n";
+      *trace << "Pop stack[" << stack.size() - 1
+             << "]: " << stack.back().getName() << "\n";
+    stack.pop_back();
     // We skip the "return to" event, as this is not expected to map
     // to the same source location across versions.
     // stackDepthChanged = true;
