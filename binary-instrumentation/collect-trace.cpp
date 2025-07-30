@@ -199,6 +199,16 @@ DWARFDie getCallSiteEntry(const DWARFDie &entry, const QBDI::rword &address,
         return callSite;
     }
   }
+  // Clang (incorrectly) places inlined subroutine call site entries in the
+  // ancestor subprogram, so check there as well
+  if (entry.getTag() == dwarf::Tag::DW_TAG_inlined_subroutine) {
+    DWARFDie parent = entry.getParent();
+    while (parent.isValid() && !parent.isSubprogramDIE()) {
+      parent = parent.getParent();
+    }
+    assert(parent.isValid());
+    return getCallSiteEntry(parent, address, instSize);
+  }
   return DWARFDie();
 }
 
