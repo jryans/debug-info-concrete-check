@@ -524,6 +524,20 @@ void popStackFrame(const QBDI::VMInstanceRef &vm) {
   }
 }
 
+void popInlinedStackFrames(const QBDI::VMInstanceRef &vm) {
+  // GCC may associate returns with inlined scope.
+  // To work around this, when processing a machine return instruction,
+  // first print and return from any inlined frames on the top the stack.
+  while (!stack.empty() && stack.back().isInlined) {
+    if (verbose)
+      *trace << "Returning from inlined frame due to return inst\n";
+    printReturnFromEventForInlinedEntry(stack.back().entry);
+    popStackFrame(vm);
+  }
+
+  // Printing and popping the native stack frame is done separately
+}
+
 QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
                                  QBDI::GPRState *gprState,
                                  QBDI::FPRState *fprState, void *data) {
@@ -734,12 +748,12 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
 
   // Log to trace before stack depth changes (by this instruction)
   if (stackDepthMayChange) {
-    const size_t depth = stack.size();
     if (currInstIsCall || currInstIsBranch) {
       // Queue for (potential) future printing based on next instruction.
       // We may drop the call based on filtering rules (e.g. external code).
       // We don't know for certain whether a branch is or is not a tail call
       // here, as it might be treated as tail call by moving to external code.
+      const size_t depth = stack.size();
       queuedCallFromEvent = [=]() {
         // Will have access to the _next_ instruction's inlined chain when run,
         // which is checked by `isFunctionPrintable` to filter internal function
@@ -748,9 +762,12 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
                                EventSource::Stack, address, vm, depth);
       };
     } else {
+      // Print and pop any inlined frames on the top of the stack
+      // to workaround GCC which may associate return with inlined scope
+      popInlinedStackFrames(vm);
       // Print immediately
       printEventFromLineInfo(lineInfo, EventType::ReturnFrom,
-                             EventSource::Stack, address, vm, depth);
+                             EventSource::Stack, address, vm);
     }
   }
 
