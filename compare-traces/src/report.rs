@@ -15,7 +15,7 @@ use similar::{ChangeTag, DiffOp, DiffTag};
 
 use crate::{
     diff::Diff,
-    event::{Event, EventType, Location},
+    event::{Event, EventSource, EventType, Location},
     print::{print_change_group, print_change_vec},
     remarks::Remark,
 };
@@ -30,6 +30,7 @@ enum DivergenceType {
     LibraryCallRemoved,
     // TODO: Refine this by pass, similar to the paper
     ProgramCallRemoved,
+    UnexpectedReturnAdded,
     Uncategorised,
 }
 
@@ -43,6 +44,7 @@ impl DivergenceType {
             DivergenceType::LibraryCallReplaced => "library-call-replaced",
             DivergenceType::LibraryCallRemoved => "library-call-removed",
             DivergenceType::ProgramCallRemoved => "program-call-removed",
+            DivergenceType::UnexpectedReturnAdded => "unexpected-return-added",
             DivergenceType::Uncategorised => "uncategorised",
         }
     }
@@ -546,6 +548,53 @@ fn check_for_program_call_removed(
     divergences
 }
 
+// Example diff:
+// + IRF: check_commit at object-file.c:0:0
+fn check_for_unexpected_return_added(
+    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
+) -> Vec<Divergence> {
+    let mut divergences = vec![];
+
+    for (diff_op, change_tuples_events) in grouped_events {
+        // Diff op for this region should be insert
+        if diff_op.tag() != DiffTag::Insert {
+            continue;
+        }
+
+        // Should have a single tuple with inserted lines
+        assert!(change_tuples_events.len() == 1);
+        let (change_tag, events) = &mut change_tuples_events[0];
+        assert!(*change_tag == ChangeTag::Insert);
+
+        // Must have only 1 event (extra conservative, will miss adjacent diffs)
+        if events.len() != 1 {
+            continue;
+        };
+
+        // Event should be inlined return from
+        if events[0].event_source != EventSource::InlinedChain {
+            continue;
+        }
+        if events[0].event_type != EventType::ReturnFrom {
+            continue;
+        }
+
+        // Extract related events
+        let related_before_events = vec![];
+        let mut related_after_events = vec![];
+        related_after_events.push(events.pop_front().unwrap());
+
+        divergences.push(Divergence::new(
+            DivergenceType::UnexpectedReturnAdded,
+            related_before_events,
+            related_after_events,
+            diff_op,
+        ));
+    }
+
+    divergences
+}
+
 fn check_for_known_divergences(
     diff: &Diff<'_>,
     grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
@@ -592,6 +641,13 @@ fn check_for_known_divergences(
         }
         {
             let mut divergences_found = check_for_program_call_removed(grouped_events);
+            if !divergences_found.is_empty() {
+                divergences.append(&mut divergences_found);
+                continue;
+            }
+        }
+        {
+            let mut divergences_found = check_for_unexpected_return_added(grouped_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
                 continue;
