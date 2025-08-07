@@ -32,6 +32,23 @@ impl Display for EventType {
     }
 }
 
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+pub enum EventSource {
+    Stack,
+    InlinedChain,
+    // Verbose,
+}
+
+impl Display for EventSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let abbreviation = match self {
+            EventSource::Stack => "",
+            EventSource::InlinedChain => "I",
+        };
+        write!(f, "{}", abbreviation)
+    }
+}
+
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
 pub struct Location {
     pub function: Option<String>,
@@ -42,6 +59,7 @@ pub struct Location {
 
 #[derive(Clone, Debug)]
 pub struct Event {
+    pub event_source: EventSource,
     pub event_type: EventType,
     // TODO: Maybe store reference instead...?
     pub detail: String,
@@ -57,8 +75,10 @@ impl Event {
         // Remove any leading indentation
         rest = rest.trim_start();
 
-        // Ignore inlined chain source tag if present
+        // Parse inlined chain source tag if present
+        let mut event_source = EventSource::Stack;
         if rest.starts_with("I") {
+            event_source = EventSource::InlinedChain;
             rest = &rest[1..];
         }
 
@@ -110,6 +130,7 @@ impl Event {
         }
 
         Ok(Self {
+            event_source,
             event_type,
             detail,
             location: Location {
@@ -187,7 +208,11 @@ impl Display for Event {
         if self.event_type == EventType::Warning {
             return write!(f, "{} {}", self.event_type, self.detail);
         }
-        write!(f, "{}: {}", self.event_type, self.detail)
+        write!(
+            f,
+            "{}{}: {}",
+            self.event_source, self.event_type, self.detail
+        )
     }
 }
 
