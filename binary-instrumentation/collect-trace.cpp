@@ -1039,6 +1039,10 @@ int qbdipreload_on_main(int argc, char **argv) {
       !std::strcmp(std::getenv("CON_TRACE_INTERNAL_FUNCTION"), "0"))
     includeInternalFunction = false;
 
+  // errs() << "argc: " << argc << "\n";
+  // for (size_t i = 0; i < argc; ++i)
+  //   errs() << "argv[" << i << "]: " << argv[i] << "\n";
+
   StringRef execPath(argv[0]);
   if (!loadExecutable(execPath))
     return QBDIPRELOAD_ERR_STARTUP_FAILED;
