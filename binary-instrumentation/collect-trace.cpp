@@ -13,6 +13,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
@@ -31,6 +32,7 @@
 #include "llvm/Support/Format.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -56,6 +58,7 @@ bool includeInternalFunction = true;
 
 pid_t pid;
 pid_t ppid;
+std::optional<SmallString<128>> traceDir;
 std::unique_ptr<raw_fd_ostream> trace;
 
 std::unique_ptr<MemoryBuffer> execBuffer;
@@ -146,10 +149,17 @@ bool openTrace() {
   ppid = getppid();
   auto traceBase = verbose ? "trace-verbose" : "trace";
   auto traceName = formatv("{0}-{1}-{2}", traceBase, ppid, pid).str();
+  SmallString<128> tracePath;
+  if (traceDir) {
+    tracePath = *traceDir;
+    sys::path::append(tracePath, traceName);
+  } else {
+    tracePath = traceName;
+  }
   std::error_code error;
   int fileDescriptor;
   error = sys::fs::openFileForWrite(
-      traceName, fileDescriptor, sys::fs::CD_CreateAlways,
+      tracePath, fileDescriptor, sys::fs::CD_CreateAlways,
       append ? sys::fs::OF_Append : sys::fs::OF_None);
   if (error)
     return false;
@@ -1020,6 +1030,8 @@ int qbdipreload_on_premain(void *gprCtx, void *fpuCtx) {
 }
 
 int qbdipreload_on_main(int argc, char **argv) {
+  if (std::getenv("CON_TRACE_DIR"))
+    traceDir = std::getenv("CON_TRACE_DIR");
   if (std::getenv("CON_TRACE_APPEND"))
     append = true;
   if (std::getenv("CON_TRACE_VERBOSE"))
