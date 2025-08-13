@@ -7,7 +7,7 @@ use clap::{Parser, ValueEnum};
 use diff::Diff;
 use indicatif::{ProgressBar, ProgressStyle};
 use similar::TextDiff;
-use tree::diff_tree;
+use tree_diff::diff_tree;
 use walkdir::WalkDir;
 
 use crate::{
@@ -23,6 +23,7 @@ mod print;
 mod remarks;
 mod report;
 mod tree;
+mod tree_diff;
 
 #[derive(ValueEnum, Clone, Debug)]
 enum DiffStrategy {

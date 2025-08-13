@@ -1,6 +1,6 @@
 use similar::{group_diff_ops, DiffOp, TextDiff};
 
-use crate::tree::TreeDiff;
+use crate::tree_diff::TreeDiff;
 
 #[derive(Debug)]
 // JRS: Could be a trait instead of struct...?
