@@ -80,6 +80,7 @@ bool currInstMayBeTailCall = false;
 bool currInstIsTailCall = false;
 bool currInstIsBranch = false;
 bool currInstIsReturn = false;
+QBDI::rword prevAddress = 0;
 QBDI::rword prevCallReturnTarget = 0;
 QBDI::rword nextAddressAfterCurrInst = 0;
 
@@ -450,6 +451,15 @@ void printReturnFromEventForInlinedEntry(const DWARFDie &entry) {
                          EventSource::InlinedChain);
 }
 
+void printReturnFromEventForInlinedAddress(const QBDI::rword &address) {
+  DILineInfo lineInfo = dwarfCtx->getLineInfoForAddress(
+      {address}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
+                  DILineInfoSpecifier::FunctionNameKind::ShortName});
+
+  printEventFromLineInfo(lineInfo, EventType::ReturnFrom,
+                         EventSource::InlinedChain, address);
+}
+
 void pushStackFrame(const DWARFDie &entry, EventSource eventSource) {
   bool isInlined = false;
   if (entry && entry.getTag() == dwarf::Tag::DW_TAG_inlined_subroutine)
@@ -680,6 +690,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     size_t stackItemsToCheck = stack.size() - stackIdxOldestChainLink;
     if (verbose)
       *trace << "Popping any frames not found\n";
+    bool firstFrameToPop = true;
     for (size_t i = stackItemsToCheck; i--;) {
       const auto &entry = stack[stackIdxOldestChainLink + i].entry;
       if (verbose) {
@@ -696,7 +707,15 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
         break;
       }
       assert(stack.back().isInlined);
-      printReturnFromEventForInlinedEntry(stack.back().entry);
+      if (firstFrameToPop) {
+        // For the first inlined frame we return from,
+        // we can make use of the previous instruction to approximate
+        // source coordinates
+        printReturnFromEventForInlinedAddress(prevAddress);
+        firstFrameToPop = false;
+      } else {
+        printReturnFromEventForInlinedEntry(stack.back().entry);
+      }
       // May also pop lurking artificial frames from past tail calls,
       // so we adjust loop iteration as needed
       size_t stackSizeBefore = stack.size();
@@ -786,6 +805,9 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     printEventFromLineInfo(lineInfo, EventType::Verbose, EventSource::Verbose,
                            address, vm);
   }
+
+  // Store address for potential use by next instruction
+  prevAddress = address;
 
   return QBDI::CONTINUE;
 }
