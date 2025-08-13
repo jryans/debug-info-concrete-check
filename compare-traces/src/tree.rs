@@ -1387,8 +1387,8 @@ pub fn diff_tree<'content>(
             let before_tree_position = before_events.len();
             before_lines.push(after_node.data(&after_lines).clone());
             before_events.push(after_node.data(&after_events).clone());
-            // JRS: This might not be correct...
-            before_labels.push(after_node.data(&after_labels).clone());
+            // We don't need to worry about labels at this stage,
+            // as they're only used to create the initial bimap
             let before_node = TreeNode::new(before_tree_position, *before_parent_index);
             let before_index = before_tree.register(before_node);
             let before_parent = &mut before_tree[before_parent_index];
