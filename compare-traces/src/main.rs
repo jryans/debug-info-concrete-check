@@ -5,6 +5,7 @@ use std::{fs, path::PathBuf};
 use anyhow::{anyhow, Context, Ok, Result};
 use clap::{Parser, ValueEnum};
 use diff::Diff;
+use indicatif::{ProgressBar, ProgressStyle};
 use similar::TextDiff;
 use tree::diff_tree;
 use walkdir::WalkDir;
@@ -123,6 +124,14 @@ fn main() -> Result<()> {
         ));
     }
 
+    let progress = ProgressBar::new(before_files.len().try_into().unwrap());
+    progress.set_style(
+        ProgressStyle::with_template(
+            "{spinner} [{elapsed_precise}] [{wide_bar}] {pos}/{len} ({eta})",
+        )
+        .unwrap(),
+    );
+
     for i in 0..before_files.len() {
         let before_file = &before_files[i];
         let after_file = &after_files[i];
@@ -133,19 +142,9 @@ fn main() -> Result<()> {
             .with_context(|| format!("Unable to read after trace ({})", after_file.display()))?;
 
         if before_content.is_empty() && after_content.is_empty() {
-            eprintln!(
-                "Skipping empty traces {} and {}…",
-                before_file.display(),
-                after_file.display()
-            );
             continue;
         }
 
-        eprintln!(
-            "Diffing {} and {}…",
-            before_file.display(),
-            after_file.display()
-        );
         let diff: Diff = match cli.diff_strategy {
             DiffStrategy::Text => Diff::from(
                 TextDiff::configure()
@@ -155,18 +154,19 @@ fn main() -> Result<()> {
             ),
             DiffStrategy::Tree => Diff::from(diff_tree(&before_content, &after_content)),
         };
-        eprintln!("Diffing complete!");
 
         if cli.diff {
             print_diff(&diff);
         }
 
         if let Some(divergence_analysis) = &mut divergence_analysis {
-            eprintln!("Analysing divergences…");
             divergence_analysis.analyse_diff(&diff);
-            eprintln!("Divergence analysis complete!");
         }
+
+        progress.inc(1);
     }
+
+    progress.finish();
 
     if let Some(divergence_analysis) = divergence_analysis {
         divergence_analysis.print_report();
