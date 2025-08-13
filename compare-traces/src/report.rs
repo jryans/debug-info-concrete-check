@@ -739,190 +739,197 @@ fn print_events(events: &Vec<Event>) {
     }
 }
 
-pub fn analyse_and_print_report(
-    diff: &Diff<'_>,
-    remarks_by_location: &Option<HashMap<Location, Remark>>,
+pub struct DivergenceAnalysis {
+    remarks_by_location: Option<HashMap<Location, Remark>>,
     tweak_event_alignment: bool,
-) -> BTreeMap<Divergence, u64> {
-    println!("Analysing divergences…");
-    println!();
-
-    let mut divergence_stats_by_coordinates: BTreeMap<Divergence, u64> = BTreeMap::new();
-
-    for op_group in &diff.grouped_diff_ops {
-        if log_enabled!(log::Level::Debug) {
-            println!("{:#?}", &op_group);
-            println!();
-            print_change_group(diff, &op_group);
-            println!();
-        }
-
-        let mut grouped_events: Vec<(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)> = vec![];
-
-        for op in op_group {
-            // TODO: Skip unnecessary collects / copies
-            let mut change_tuples_strings: Vec<_> = op
-                .iter_slices(&diff.before_lines, &diff.after_lines)
-                .map(|(tag, slices)| (tag, Vec::from(slices)))
-                .collect();
-
-            // Fix up alignment where possible
-            // JRS: Maybe remove this by using the previous line from context...?
-            if tweak_event_alignment {
-                if tweak_alignment(&op, &mut change_tuples_strings) {
-                    if log_enabled!(log::Level::Debug) {
-                        println!("Alignment tweaked, new ordering:");
-                        print_change_vec(&op, &change_tuples_strings);
-                        println!();
-                    }
-                }
-            }
-
-            // Parse raw text into events
-            let mut parse_errors = vec![];
-            let change_tuples_events: Vec<_> = change_tuples_strings
-                .iter()
-                .map(|(tag, strings)| {
-                    (
-                        tag.clone(),
-                        strings
-                            .iter()
-                            .map(|str| Event::parse(str))
-                            .filter_map(|r| r.map_err(|e| parse_errors.push(e)).ok())
-                            .collect::<VecDeque<_>>(),
-                    )
-                })
-                .collect();
-            for error in parse_errors {
-                println!("{}", error);
-                println!();
-            }
-
-            grouped_events.push((*op, change_tuples_events));
-        }
-
-        // Check events against known divergence patterns
-        let mut new_divergences = check_for_known_divergences(diff, &mut grouped_events);
-        for divergence in &mut new_divergences {
-            if log_enabled!(log::Level::Debug) {
-                println!("{:#?}", divergence);
-                println!();
-            }
-
-            // Look for optimisation remarks at divergence coordinates
-            if let Some(remarks) = remarks_by_location {
-                // TODO: Enable for other types where possible
-                if divergence.divergence_type == DivergenceType::ProgramCallRemoved {
-                    if let Some(remark) = remarks.get(divergence.location()) {
-                        if log_enabled!(log::Level::Debug) {
-                            println!("Matching remark: {:#?}", remark);
-                            println!();
-                        }
-                        // Record pass responsible in divergence
-                        divergence.pass_responsible = Some(remark.pass.clone());
-                    }
-                }
-            }
-
-            // Insert or update stats for these source coordinates
-            if let Some(occurrences) = divergence_stats_by_coordinates.get_mut(divergence) {
-                *occurrences += 1;
-            } else {
-                divergence_stats_by_coordinates.insert(divergence.clone(), 1);
-            }
-        }
-    }
-
-    println!("Divergence analysis complete!");
-    println!();
-
-    println!("## Divergences by source coordinates");
-    println!();
-
-    let mut divergence_coordinates_count_by_type: BTreeMap<DivergenceType, u64> = BTreeMap::new();
-    let mut occurrences_total: u64 = 0;
-    for (divergence, occurrences) in &divergence_stats_by_coordinates {
-        println!("{:?}", divergence.divergence_type);
-        if !divergence.before_events.is_empty() {
-            println!("  Before events:");
-            print_events(&divergence.before_events);
-        }
-        if !divergence.after_events.is_empty() {
-            println!("  After events:");
-            print_events(&divergence.after_events);
-        }
-        println!("  Occurrences: {}", occurrences);
-        if let Some(pass) = &divergence.pass_responsible {
-            println!("  Pass responsible: {}", pass);
-        }
-        if log_enabled!(log::Level::Info) {
-            println!(
-                "  Example trace lines: -{}, +{}",
-                divergence.old_index, divergence.new_index
-            );
-        }
-        println!();
-        if let Some(count) =
-            divergence_coordinates_count_by_type.get_mut(&divergence.divergence_type)
-        {
-            *count += 1;
-        } else {
-            divergence_coordinates_count_by_type.insert(divergence.divergence_type.clone(), 1);
-        }
-        occurrences_total += occurrences;
-    }
-
-    println!("## Divergences with unique coordinates by type");
-    println!();
-
-    for (divergence_type, count) in &divergence_coordinates_count_by_type {
-        println!("{:?}", divergence_type);
-        println!("  Unique divergence coordinates: {}", count);
-        println!();
-    }
-
-    println!("## Summary");
-    println!();
-
-    println!(
-        "{} unique divergence coordinates",
-        divergence_stats_by_coordinates.len()
-    );
-    println!("{} divergence occurrences", occurrences_total);
-
-    divergence_stats_by_coordinates
+    divergence_stats_by_coordinates: BTreeMap<Divergence, u64>,
 }
 
-pub fn print_before_events_by_type(
-    divergence_stats_by_coordinates: &BTreeMap<Divergence, u64>,
-    events_by_type_dir: &PathBuf,
-) -> Result<()> {
-    let mut files_by_type: HashMap<DivergenceType, File> = HashMap::new();
-    for divergence_type in enum_iterator::all::<DivergenceType>() {
-        let file_path = events_by_type_dir.join(divergence_type.to_file_name());
-        let file = File::create(&file_path).with_context(|| {
-            format!(
-                "Unable to create events by type file ({})",
-                file_path.display()
-            )
-        })?;
-        files_by_type.insert(divergence_type, file);
-    }
-
-    for divergence in divergence_stats_by_coordinates.keys() {
-        let mut file = &files_by_type[&divergence.divergence_type];
-        let printable_events = match &divergence.divergence_type {
-            // In the less common case of only added events,
-            // let's use those so we at least have something to count
-            DivergenceType::LibraryCallAdded => &divergence.after_events,
-            _ => &divergence.before_events,
-        };
-        for event in printable_events {
-            writeln!(file, "{}", event)?;
+impl DivergenceAnalysis {
+    pub fn new(
+        remarks_by_location: Option<HashMap<Location, Remark>>,
+        tweak_event_alignment: bool,
+    ) -> DivergenceAnalysis {
+        DivergenceAnalysis {
+            remarks_by_location,
+            tweak_event_alignment,
+            divergence_stats_by_coordinates: BTreeMap::new(),
         }
     }
 
-    Ok(())
+    pub fn analyse_diff(&mut self, diff: &Diff<'_>) {
+        for op_group in &diff.grouped_diff_ops {
+            if log_enabled!(log::Level::Debug) {
+                println!("{:#?}", &op_group);
+                println!();
+                print_change_group(diff, &op_group);
+                println!();
+            }
+
+            let mut grouped_events: Vec<(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)> = vec![];
+
+            for op in op_group {
+                // TODO: Skip unnecessary collects / copies
+                let mut change_tuples_strings: Vec<_> = op
+                    .iter_slices(&diff.before_lines, &diff.after_lines)
+                    .map(|(tag, slices)| (tag, Vec::from(slices)))
+                    .collect();
+
+                // Fix up alignment where possible
+                // JRS: Maybe remove this by using the previous line from context...?
+                if self.tweak_event_alignment {
+                    if tweak_alignment(&op, &mut change_tuples_strings) {
+                        if log_enabled!(log::Level::Debug) {
+                            println!("Alignment tweaked, new ordering:");
+                            print_change_vec(&op, &change_tuples_strings);
+                            println!();
+                        }
+                    }
+                }
+
+                // Parse raw text into events
+                let mut parse_errors = vec![];
+                let change_tuples_events: Vec<_> = change_tuples_strings
+                    .iter()
+                    .map(|(tag, strings)| {
+                        (
+                            tag.clone(),
+                            strings
+                                .iter()
+                                .map(|str| Event::parse(str))
+                                .filter_map(|r| r.map_err(|e| parse_errors.push(e)).ok())
+                                .collect::<VecDeque<_>>(),
+                        )
+                    })
+                    .collect();
+                for error in parse_errors {
+                    println!("{}", error);
+                    println!();
+                }
+
+                grouped_events.push((*op, change_tuples_events));
+            }
+
+            // Check events against known divergence patterns
+            let mut new_divergences = check_for_known_divergences(diff, &mut grouped_events);
+            for divergence in &mut new_divergences {
+                if log_enabled!(log::Level::Debug) {
+                    println!("{:#?}", divergence);
+                    println!();
+                }
+
+                // Look for optimisation remarks at divergence coordinates
+                if let Some(remarks) = &self.remarks_by_location {
+                    // TODO: Enable for other types where possible
+                    if divergence.divergence_type == DivergenceType::ProgramCallRemoved {
+                        if let Some(remark) = remarks.get(divergence.location()) {
+                            if log_enabled!(log::Level::Debug) {
+                                println!("Matching remark: {:#?}", remark);
+                                println!();
+                            }
+                            // Record pass responsible in divergence
+                            divergence.pass_responsible = Some(remark.pass.clone());
+                        }
+                    }
+                }
+
+                // Insert or update stats for these source coordinates
+                if let Some(occurrences) = self.divergence_stats_by_coordinates.get_mut(divergence)
+                {
+                    *occurrences += 1;
+                } else {
+                    self.divergence_stats_by_coordinates
+                        .insert(divergence.clone(), 1);
+                }
+            }
+        }
+    }
+
+    pub fn print_report(&self) {
+        println!("## Divergences by source coordinates");
+        println!();
+
+        let mut divergence_coordinates_count_by_type: BTreeMap<DivergenceType, u64> =
+            BTreeMap::new();
+        let mut occurrences_total: u64 = 0;
+        for (divergence, occurrences) in &self.divergence_stats_by_coordinates {
+            println!("{:?}", divergence.divergence_type);
+            if !divergence.before_events.is_empty() {
+                println!("  Before events:");
+                print_events(&divergence.before_events);
+            }
+            if !divergence.after_events.is_empty() {
+                println!("  After events:");
+                print_events(&divergence.after_events);
+            }
+            println!("  Occurrences: {}", occurrences);
+            if let Some(pass) = &divergence.pass_responsible {
+                println!("  Pass responsible: {}", pass);
+            }
+            if log_enabled!(log::Level::Info) {
+                println!(
+                    "  Example trace lines: -{}, +{}",
+                    divergence.old_index, divergence.new_index
+                );
+            }
+            println!();
+            if let Some(count) =
+                divergence_coordinates_count_by_type.get_mut(&divergence.divergence_type)
+            {
+                *count += 1;
+            } else {
+                divergence_coordinates_count_by_type.insert(divergence.divergence_type.clone(), 1);
+            }
+            occurrences_total += occurrences;
+        }
+
+        println!("## Divergences with unique coordinates by type");
+        println!();
+
+        for (divergence_type, count) in &divergence_coordinates_count_by_type {
+            println!("{:?}", divergence_type);
+            println!("  Unique divergence coordinates: {}", count);
+            println!();
+        }
+
+        println!("## Summary");
+        println!();
+
+        println!(
+            "{} unique divergence coordinates",
+            self.divergence_stats_by_coordinates.len()
+        );
+        println!("{} divergence occurrences", occurrences_total);
+    }
+
+    pub fn print_before_events_by_type(&self, events_by_type_dir: &PathBuf) -> Result<()> {
+        let mut files_by_type: HashMap<DivergenceType, File> = HashMap::new();
+        for divergence_type in enum_iterator::all::<DivergenceType>() {
+            let file_path = events_by_type_dir.join(divergence_type.to_file_name());
+            let file = File::create(&file_path).with_context(|| {
+                format!(
+                    "Unable to create events by type file ({})",
+                    file_path.display()
+                )
+            })?;
+            files_by_type.insert(divergence_type, file);
+        }
+
+        for divergence in self.divergence_stats_by_coordinates.keys() {
+            let mut file = &files_by_type[&divergence.divergence_type];
+            let printable_events = match &divergence.divergence_type {
+                // In the less common case of only added events,
+                // let's use those so we at least have something to count
+                DivergenceType::LibraryCallAdded => &divergence.after_events,
+                _ => &divergence.before_events,
+            };
+            for event in printable_events {
+                writeln!(file, "{}", event)?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

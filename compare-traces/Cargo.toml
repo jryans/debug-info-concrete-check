@@ -6,6 +6,7 @@ authors = ["J. Ryan Stinnett <jryans@gmail.com>"]
 description = "Compares dynamic instrumentation traces and reports divergences"
 
 [dependencies]
+alphanumeric-sort = "1.5.3"
 anyhow = "1.0.95"
 bimap = "0.6.3"
 clap = { version = "4.5.27", features = ["derive"] }
@@ -21,6 +22,7 @@ serde = "1.0.218"
 serde_yaml = "0.9.34"
 similar = "2.7.0"
 strsim = "0.11.1"
+walkdir = "2.5.0"
 
 [profile.dev]
 split-debuginfo = "packed"

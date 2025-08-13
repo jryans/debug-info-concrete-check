@@ -7,12 +7,13 @@ use clap::{Parser, ValueEnum};
 use diff::Diff;
 use similar::TextDiff;
 use tree::diff_tree;
+use walkdir::WalkDir;
 
 use crate::{
     event::Location,
     print::print_diff,
     remarks::{load_remarks, Remark},
-    report::{analyse_and_print_report, print_before_events_by_type},
+    report::DivergenceAnalysis,
 };
 
 mod diff;
@@ -33,10 +34,10 @@ enum DiffStrategy {
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Cli {
-    /// Trace before program transformations
-    before_file: PathBuf,
-    /// Trace after program transformations
-    after_file: PathBuf,
+    /// Trace file or directory before program transformations
+    before_file_or_dir: PathBuf,
+    /// Trace file or directory after program transformations
+    after_file_or_dir: PathBuf,
 
     /// LLVM optimisation remarks (YAML)
     #[arg(long = "remarks")]
@@ -81,45 +82,103 @@ fn main() -> Result<()> {
         console::set_colors_enabled(colors_enabled);
     }
 
-    let before_content = fs::read_to_string(&cli.before_file).with_context(|| {
-        format!(
-            "Unable to read before trace ({})",
-            cli.before_file.display()
-        )
-    })?;
-    let after_content = fs::read_to_string(&cli.after_file)
-        .with_context(|| format!("Unable to read after trace ({})", cli.after_file.display()))?;
+    let mut before_files: Vec<PathBuf> = Vec::new();
+    for entry in WalkDir::new(&cli.before_file_or_dir).sort_by_file_name() {
+        let entry = entry?;
+        if entry.file_type().is_dir() {
+            continue;
+        }
+        before_files.push(entry.into_path());
+    }
+    alphanumeric_sort::sort_path_slice(&mut before_files);
+    let mut after_files: Vec<PathBuf> = Vec::new();
+    for entry in WalkDir::new(&cli.after_file_or_dir).sort_by_file_name() {
+        let entry = entry?;
+        if entry.file_type().is_dir() {
+            continue;
+        }
+        after_files.push(entry.into_path());
+    }
+    alphanumeric_sort::sort_path_slice(&mut after_files);
+
+    // Verify that we have same file hierarchy on both sides
+    if before_files.len() != after_files.len() {
+        return Err(anyhow!(
+            "Mismatched file hierarchies: {} before files, {} after files",
+            before_files.len(),
+            after_files.len()
+        ));
+    }
 
     let mut remarks_by_location: Option<HashMap<Location, Remark>> = None;
-    if let Some(remarks_file) = cli.remarks_file {
+    if let Some(remarks_file) = &cli.remarks_file {
         remarks_by_location = Some(load_remarks(&remarks_file)?);
     }
 
-    let diff: Diff = match cli.diff_strategy {
-        DiffStrategy::Text => Diff::from(
-            TextDiff::configure()
-                .algorithm(similar::Algorithm::Patience)
-                .timeout(Duration::from_secs(10 * 60))
-                .diff_lines(&before_content, &after_content),
-        ),
-        DiffStrategy::Tree => Diff::from(diff_tree(&before_content, &after_content)),
-    };
-
-    if cli.diff {
-        print_diff(&diff);
+    let mut divergence_analysis: Option<DivergenceAnalysis> = None;
+    if cli.report {
+        divergence_analysis = Some(DivergenceAnalysis::new(
+            remarks_by_location,
+            cli.tweak_event_alignment,
+        ));
     }
 
-    if cli.report {
-        let divergence_stats_by_coordinates =
-            analyse_and_print_report(&diff, &remarks_by_location, cli.tweak_event_alignment);
-        if let Some(events_by_type_dir) = cli.events_by_type_dir {
+    for i in 0..before_files.len() {
+        let before_file = &before_files[i];
+        let after_file = &after_files[i];
+
+        let before_content = fs::read_to_string(before_file)
+            .with_context(|| format!("Unable to read before trace ({})", before_file.display()))?;
+        let after_content = fs::read_to_string(after_file)
+            .with_context(|| format!("Unable to read after trace ({})", after_file.display()))?;
+
+        if before_content.is_empty() && after_content.is_empty() {
+            eprintln!(
+                "Skipping empty traces {} and {}…",
+                before_file.display(),
+                after_file.display()
+            );
+            continue;
+        }
+
+        eprintln!(
+            "Diffing {} and {}…",
+            before_file.display(),
+            after_file.display()
+        );
+        let diff: Diff = match cli.diff_strategy {
+            DiffStrategy::Text => Diff::from(
+                TextDiff::configure()
+                    .algorithm(similar::Algorithm::Patience)
+                    .timeout(Duration::from_secs(10 * 60))
+                    .diff_lines(&before_content, &after_content),
+            ),
+            DiffStrategy::Tree => Diff::from(diff_tree(&before_content, &after_content)),
+        };
+        eprintln!("Diffing complete!");
+
+        if cli.diff {
+            print_diff(&diff);
+        }
+
+        if let Some(divergence_analysis) = &mut divergence_analysis {
+            eprintln!("Analysing divergences…");
+            divergence_analysis.analyse_diff(&diff);
+            eprintln!("Divergence analysis complete!");
+        }
+    }
+
+    if let Some(divergence_analysis) = divergence_analysis {
+        divergence_analysis.print_report();
+
+        if let Some(events_by_type_dir) = &cli.events_by_type_dir {
             if !events_by_type_dir.is_dir() {
                 return Err(anyhow!(
                     "Events by type path `{}` is not a directory",
                     events_by_type_dir.display(),
                 ));
             }
-            print_before_events_by_type(&divergence_stats_by_coordinates, &events_by_type_dir)?;
+            divergence_analysis.print_before_events_by_type(&events_by_type_dir)?;
         }
     }
 
