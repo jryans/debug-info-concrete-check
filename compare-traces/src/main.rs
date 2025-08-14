@@ -1,6 +1,7 @@
 use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 use std::time::Duration;
-use std::{fs, path::PathBuf};
 
 use anyhow::{anyhow, Context, Ok, Result};
 use clap::{Parser, ValueEnum};
