@@ -1,10 +1,8 @@
-use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
-    fs::File,
-    hash::Hash,
-    io::Write,
-    path::PathBuf,
-};
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::fs::File;
+use std::hash::Hash;
+use std::io::Write;
+use std::path::PathBuf;
 
 use anyhow::{Context, Ok, Result};
 use enum_iterator::Sequence;
@@ -13,12 +11,10 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use similar::{ChangeTag, DiffOp, DiffTag};
 
-use crate::{
-    diff::Diff,
-    event::{Event, EventSource, EventType, Location},
-    print::{print_change_group, print_change_vec},
-    remarks::Remark,
-};
+use crate::diff::Diff;
+use crate::event::{Event, EventSource, EventType, Location};
+use crate::print::{print_change_group, print_change_vec};
+use crate::remarks::Remark;
 
 #[derive(Sequence, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 enum DivergenceType {

@@ -10,12 +10,10 @@ use similar::TextDiff;
 use tree_diff::diff_tree;
 use walkdir::WalkDir;
 
-use crate::{
-    event::Location,
-    print::print_diff,
-    remarks::{load_remarks, Remark},
-    report::DivergenceAnalysis,
-};
+use crate::event::Location;
+use crate::print::print_diff;
+use crate::remarks::{load_remarks, Remark};
+use crate::report::DivergenceAnalysis;
 
 mod diff;
 mod event;
