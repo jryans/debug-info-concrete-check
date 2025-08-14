@@ -14,12 +14,14 @@ use crate::event::Location;
 use crate::print::print_diff;
 use crate::remarks::{load_remarks, Remark};
 use crate::report::DivergenceAnalysis;
+use crate::trace::Trace;
 
 mod diff;
 mod event;
 mod print;
 mod remarks;
 mod report;
+mod trace;
 mod tree;
 mod tree_diff;
 
@@ -151,7 +153,11 @@ fn main() -> Result<()> {
                     .timeout(Duration::from_secs(10 * 60))
                     .diff_lines(&before_content, &after_content),
             ),
-            DiffStrategy::Tree => Diff::from(diff_tree(&before_content, &after_content)),
+            DiffStrategy::Tree => {
+                let before = Trace::parse(&before_content);
+                let after = Trace::parse(&after_content);
+                Diff::from(diff_tree(before, after))
+            }
         };
 
         if cli.diff {

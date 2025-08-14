@@ -7,6 +7,7 @@ use similar::{capture_diff_slices, DiffOp, DiffTag};
 use strsim::normalized_levenshtein;
 
 use crate::event::{Event, Eventable};
+use crate::trace::Trace;
 use crate::tree::{Tree, TreeNode, TreeNodeIndex};
 
 struct TreeLcs {
@@ -919,50 +920,31 @@ fn find_position_in_parent(
 /// Diff tree using the Chawathe et al. approach
 // TODO: Separate diff algorithm from tree events to simplify testing and reuse
 pub fn diff_tree<'content>(
-    before_content: &'content str,
-    after_content: &'content str,
+    mut before: Trace<'content>,
+    after: Trace<'content>,
 ) -> TreeDiff<'content> {
-    let mut before_lines: Vec<_> = before_content.lines().collect();
-    let after_lines: Vec<_> = after_content.lines().collect();
-
-    // Parse lines into fuzzy events
-    let mut before_events: Vec<_> = before_lines
-        .iter()
-        .map(|line| FuzzyEvent(Event::parse(line).unwrap()))
+    // Morph trace events into fuzzy events
+    let mut before_events: Vec<_> = before
+        .events
+        .into_iter()
+        .map(|event| FuzzyEvent(event))
         .collect();
-    let mut after_events: Vec<_> = after_lines
-        .iter()
-        .map(|line| FuzzyEvent(Event::parse(line).unwrap()))
+    let after_events: Vec<_> = after
+        .events
+        .into_iter()
+        .map(|event| FuzzyEvent(event))
         .collect();
 
-    // Attach partner events
-    // JRS: Do we need to attach partners when applying add operations...?
-    for i in 0..(before_events.len() - 1) {
-        let (left, right) = before_events.split_at_mut(i + 1);
-        let a = left.last_mut().unwrap();
-        let b = right.first().unwrap();
-        a.attach_partner(b);
-    }
-    for i in 0..(after_events.len() - 1) {
-        let (left, right) = after_events.split_at_mut(i + 1);
-        let a = left.last_mut().unwrap();
-        let b = right.first().unwrap();
-        a.attach_partner(b);
-    }
-
-    // Convert lines into trees
     // JRS: Do we want to save a copy of the before tree without edits...?
-    let mut before_tree = Tree::from_indented_items(&before_lines);
-    let after_tree = Tree::from_indented_items(&after_lines);
 
     // Collect tree event labels from function names along each node's tree path
-    let mut before_labels = tree_event_labels(&before_tree, &before_events);
-    let after_labels = tree_event_labels(&after_tree, &after_events);
+    let before_labels = tree_event_labels(&before.tree, &before_events);
+    let after_labels = tree_event_labels(&after.tree, &after_events);
 
     // Build initial matching bimap
     let mut matching = matching_bimap(
-        &before_tree,
-        &after_tree,
+        &before.tree,
+        &after.tree,
         &before_events,
         &after_events,
         &before_labels,
@@ -976,12 +958,12 @@ pub fn diff_tree<'content>(
     let mut after_in_order: HashSet<TreeNodeIndex> = HashSet::new();
 
     // Visit after nodes in breadth-first order
-    for after_node in after_tree.bfs() {
+    for after_node in after.tree.bfs() {
         let after_index = &after_node.index;
         if matching.contains_right(after_index) {
             // Match exists, check if replacements or moves are needed
             let before_index = matching.get_by_right(after_index).unwrap();
-            let before_node = &before_tree[before_index];
+            let before_node = &before.tree[before_index];
             // Compare events without fuzzy wrappers and partners
             let before_event = before_node.data(&before_events);
             let after_event = after_node.data(&after_events);
@@ -1001,8 +983,8 @@ pub fn diff_tree<'content>(
             // z: target_before_parent (from matching `after_parent`)
             // w: before_node (from matching `after_node`)
             // v: current_before_parent (from `before_node` parent)
-            let after_parent_index = &after_node.parent(&after_tree).unwrap().index;
-            let current_before_parent_index = &before_node.parent(&before_tree).unwrap().index;
+            let after_parent_index = &after_node.parent(&after.tree).unwrap().index;
+            let current_before_parent_index = &before_node.parent(&before.tree).unwrap().index;
             if let Some(target_before_parent_index) = matching.get_by_right(after_parent_index) {
                 if current_before_parent_index != target_before_parent_index {
                     // Parent match not found, move node to target parent
@@ -1010,8 +992,8 @@ pub fn diff_tree<'content>(
                     // though they do of course appear for general tree diffs.
                     // Perhaps optionally disable this ability for our trees...?
                     let child_position = find_position_in_parent(
-                        &before_tree,
-                        &after_tree,
+                        &before.tree,
+                        &after.tree,
                         &matching,
                         after_index,
                         &mut before_in_order,
@@ -1024,21 +1006,21 @@ pub fn diff_tree<'content>(
                         after_index: *after_index,
                     };
                     // Apply move to before tree and add to ops
-                    edit_tree(&mut before_tree, &op);
+                    edit_tree(&mut before.tree, &op);
                     edit_ops.push(op);
                 }
             }
         } else {
             // Match not found, need to add after node
             let child_position = find_position_in_parent(
-                &before_tree,
-                &after_tree,
+                &before.tree,
+                &after.tree,
                 &matching,
                 after_index,
                 &mut before_in_order,
                 &mut after_in_order,
             );
-            let after_parent_index = &after_node.parent(&after_tree).unwrap().index;
+            let after_parent_index = &after_node.parent(&after.tree).unwrap().index;
             let before_parent_index = matching.get_by_right(after_parent_index).unwrap();
             let op = TreeEditOp::Add {
                 parent_index: *before_parent_index,
@@ -1047,13 +1029,14 @@ pub fn diff_tree<'content>(
             };
             // Add to the before tree
             let before_tree_position = before_events.len();
-            before_lines.push(after_node.data(&after_lines).clone());
+            before.lines.push(after_node.data(&after.lines).clone());
             before_events.push(after_node.data(&after_events).clone());
+            // JRS: Do we need to attach partners when applying add operations...?
             // We don't need to worry about labels at this stage,
             // as they're only used to create the initial bimap
             let before_node = TreeNode::new(before_tree_position, *before_parent_index);
-            let before_index = before_tree.register(before_node);
-            let before_parent = &mut before_tree[before_parent_index];
+            let before_index = before.tree.register(before_node);
+            let before_parent = &mut before.tree[before_parent_index];
             before_parent.children.insert(child_position, before_index);
             // Add to matching
             matching.insert(before_index, *after_index);
@@ -1064,8 +1047,8 @@ pub fn diff_tree<'content>(
         let before_index = matching.get_by_right(after_index).unwrap();
         // Align children
         let move_ops = align_children(
-            &mut before_tree,
-            &after_tree,
+            &mut before.tree,
+            &after.tree,
             &matching,
             before_index,
             after_index,
@@ -1079,7 +1062,7 @@ pub fn diff_tree<'content>(
     // Visit before nodes using depth-first, post-order search
     let mut deleted_before_nodes: HashSet<TreeNodeIndex> = HashSet::new();
     let mut delete_ops: Vec<TreeEditOp> = Vec::new();
-    for before_node in before_tree.dfs_post_order() {
+    for before_node in before.tree.dfs_post_order() {
         let before_index = &before_node.index;
         if !matching.contains_left(before_index) {
             // Add to deleted node set
@@ -1106,7 +1089,7 @@ pub fn diff_tree<'content>(
             TreeEditOp::Remove { before_index } => before_index,
             _ => unreachable!(),
         };
-        let parent_index = match before_tree[before_index].parent(&before_tree) {
+        let parent_index = match before.tree[before_index].parent(&before.tree) {
             Some(parent_node) => &parent_node.index,
             None => return true,
         };
@@ -1124,13 +1107,13 @@ pub fn diff_tree<'content>(
         // and converting moves to text diffs creates too much noise,
         // so for now we filter them out
         .filter(|edit_op| !matches!(edit_op, TreeEditOp::Move { .. }))
-        .map(|edit_op| edit_op.to_diff_ops(&before_tree, &after_tree))
+        .map(|edit_op| edit_op.to_diff_ops(&before.tree, &after.tree))
         .collect();
     compact_diff_ops(&mut grouped_diff_ops);
 
     TreeDiff {
-        before_lines,
-        after_lines,
+        before_lines: before.lines,
+        after_lines: after.lines,
         edit_ops,
         grouped_diff_ops,
     }
@@ -1468,7 +1451,7 @@ CF: D at file.tex
     CF: Se at file.tex
     CF: Sg at file.tex"
             .trim();
-        let diff = diff_tree(before_content, after_content);
+        let diff = diff_tree(Trace::parse(before_content), Trace::parse(after_content));
         assert_eq!(
             diff.edit_ops,
             vec![
@@ -1524,7 +1507,7 @@ CF: all_attrs_init at attr.c:155:3
   CT: hashmap_iter_next at hashmap.c:295:0
   RF: hashmap_iter_next at hashmap.c:308:1"
             .trim();
-        let diff = diff_tree(before_content, after_content);
+        let diff = diff_tree(Trace::parse(before_content), Trace::parse(after_content));
         assert_eq!(
             diff.edit_ops,
             vec![TreeEditOp::Remove {
@@ -1571,7 +1554,7 @@ CF: system_path at exec-cmd.c:268:27
   CT: system_prefix at exec-cmd.c:247:0
   RF: system_prefix at exec-cmd.c:248:2"
             .trim();
-        let diff = diff_tree(before_content, after_content);
+        let diff = diff_tree(Trace::parse(before_content), Trace::parse(after_content));
         assert_eq!(
             diff.edit_ops,
             vec![TreeEditOp::Remove {
@@ -1600,7 +1583,7 @@ CF: strbuf_vaddf at strbuf.c:397:8
   CT: Jump to external code for _vsnprintf
   RF: Jump to external code for _vsnprintf"
             .trim();
-        let diff = diff_tree(before_content, after_content);
+        let diff = diff_tree(Trace::parse(before_content), Trace::parse(after_content));
         assert_eq!(
             diff.edit_ops,
             vec![
@@ -1645,7 +1628,7 @@ CF: main at ffmpeg.c:4521:5
   CT: init_dynload at cmdutils.c:84:1
   RF: init_dynload at cmdutils.c:84:1"
             .trim();
-        let diff = diff_tree(before_content, after_content);
+        let diff = diff_tree(Trace::parse(before_content), Trace::parse(after_content));
         assert_eq!(
             diff.edit_ops,
             vec![TreeEditOp::Replace {
@@ -1689,7 +1672,7 @@ ICF: error_builtin at usage.c:81:11
     RF: Jump to external code for dcgettext
   IRF: _ at gettext.h:0:0"
             .trim();
-        let diff = diff_tree(before_content, after_content);
+        let diff = diff_tree(Trace::parse(before_content), Trace::parse(after_content));
         assert_eq!(
             diff.edit_ops,
             vec![
