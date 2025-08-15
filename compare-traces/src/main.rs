@@ -12,6 +12,7 @@ use tree_diff::diff_tree;
 use walkdir::WalkDir;
 
 use crate::event::Location;
+use crate::inlining::preprocess_inlining;
 use crate::print::print_diff;
 use crate::remarks::{load_remarks, Remark};
 use crate::report::DivergenceAnalysis;
@@ -19,6 +20,7 @@ use crate::trace::Trace;
 
 mod diff;
 mod event;
+mod inlining;
 mod print;
 mod remarks;
 mod report;
@@ -155,8 +157,9 @@ fn main() -> Result<()> {
                     .diff_lines(&before_content, &after_content),
             ),
             DiffStrategy::Tree => {
-                let before = Trace::parse(&before_content);
-                let after = Trace::parse(&after_content);
+                let mut before = Trace::parse(&before_content);
+                let mut after = Trace::parse(&after_content);
+                preprocess_inlining(&mut before, &mut after);
                 Diff::from(diff_tree(before, after))
             }
         };
