@@ -2,7 +2,16 @@ use std::collections::{HashSet, VecDeque};
 use std::hash::Hash;
 use std::ops::{Index, IndexMut};
 
-use crate::event::line_depth;
+use once_cell::sync::Lazy;
+use regex::Regex;
+
+/// Computes 1-based depth of a single line.
+/// Assumes 2 space indentation is used.
+// JRS: This should probably move to the `Trace` module
+fn line_depth(line: &str) -> usize {
+    static INDENT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^ *").unwrap());
+    INDENT_RE.captures(line).map_or(0, |c| c[0].len() / 2) + 1
+}
 
 /// A separate `Root` value is reserved for the root node.
 /// This allows node indices to remain in sync with those for the separate data array.
@@ -147,6 +156,7 @@ impl Tree {
     }
 
     /// Build a tree from indented items
+    // JRS: This should probably move to the `Trace` module
     pub fn from_indented_items(items: &[&str]) -> Tree {
         assert!(items.len() > 0);
         assert!(line_depth(items[0]) == 1);
@@ -192,6 +202,15 @@ impl Tree {
         TreeDfsPreOrder {
             tree: &self,
             stack: Vec::from([self.root()]),
+        }
+    }
+
+    pub fn dfs_pre_order_with_depth(&self) -> TreeDfsPreOrderWithDepth {
+        TreeDfsPreOrderWithDepth {
+            tree: &self,
+            // Depth is 1-based for actual events,
+            // so root is one less than that.
+            stack: Vec::from([(self.root(), 0)]),
         }
     }
 
@@ -289,6 +308,43 @@ impl<'tree> Iterator for TreeDfsPreOrder<'tree> {
                     continue;
                 }
                 return Some(node);
+            }
+        }
+
+        return None;
+    }
+}
+
+pub struct TreeDfsPreOrderWithDepth<'tree> {
+    tree: &'tree Tree,
+    stack: Vec<(&'tree TreeNode, usize)>,
+}
+
+impl<'tree> Iterator for TreeDfsPreOrderWithDepth<'tree> {
+    type Item = (&'tree TreeNode, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.stack.is_empty() {
+            return None;
+        }
+
+        while !self.stack.is_empty() {
+            // Pop from the end of the stack
+            let (node, depth) = self.stack.pop().unwrap();
+            if node.is_leaf() {
+                // If `node` is a leaf, stop here for now
+                return Some((node, depth));
+            } else {
+                // If `node` is a branch, push all children (in reverse for expected ordering)
+                for i in (0..node.children.len()).rev() {
+                    self.stack
+                        .push((node.child(&self.tree, i).unwrap(), depth + 1));
+                }
+                // For all non-root branches, stop here for now
+                if node.index.is_root() {
+                    continue;
+                }
+                return Some((node, depth));
             }
         }
 
@@ -439,6 +495,28 @@ mod tests {
             .map(|node| node.data(&items).trim())
             .collect();
         assert_eq!(branches, vec!["0", "0.0", "1", "1.0"]);
+    }
+
+    #[test]
+    fn tree_dfs_pre_order_with_depth() {
+        let items: Vec<_> = "
+0
+  0.0
+    0.0.0
+  0.1
+  0.2
+1
+  1.0
+    1.0.0"
+            .trim()
+            .lines()
+            .collect();
+        let tree = Tree::from_indented_items(&items);
+        let depths: Vec<usize> = tree
+            .dfs_pre_order_with_depth()
+            .map(|(_, depth)| depth)
+            .collect();
+        assert_eq!(depths, vec![1, 2, 3, 2, 2, 1, 2, 3]);
     }
 
     #[test]

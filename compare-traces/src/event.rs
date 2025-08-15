@@ -5,13 +5,6 @@ use anyhow::{anyhow, Ok, Result};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-/// Computes 1-based depth of a single line.
-/// Assumes 2 space indentation is used.
-pub fn line_depth(line: &str) -> usize {
-    static INDENT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^ *").unwrap());
-    INDENT_RE.captures(line).map_or(0, |c| c[0].len() / 2) + 1
-}
-
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 pub enum EventType {
     CallFrom,
