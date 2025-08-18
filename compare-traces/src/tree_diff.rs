@@ -331,6 +331,10 @@ fn edit_tree(tree: &mut Tree, edit: &TreeEditOp) {
                 new_child_position -= 1;
             }
             target_parent.children.insert(new_child_position, child);
+            // If parent did change, update the child's `parent` field as well
+            if !same_parent {
+                tree[before_index].parent = Some(*parent_index);
+            }
         }
         _ => unimplemented!(),
     }
