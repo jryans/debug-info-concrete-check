@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, File};
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -67,6 +68,10 @@ struct Cli {
     /// Tweak event alignment to improve text diffing results
     #[arg(long)]
     tweak_event_alignment: bool,
+
+    /// Whether to save traces to new files just after the inlining transform
+    #[arg(long)]
+    save_after_inlining_transform: bool,
 
     #[command(flatten)]
     verbose: clap_verbosity_flag::Verbosity,
@@ -160,6 +165,32 @@ fn main() -> Result<()> {
                 let mut before = Trace::parse(&before_content);
                 let mut after = Trace::parse(&after_content);
                 preprocess_inlining(&mut before, &mut after);
+
+                if cli.save_after_inlining_transform {
+                    let before_file_inlining_path = before_file.with_file_name(
+                        before_file
+                            .file_name()
+                            .unwrap()
+                            .to_str()
+                            .unwrap()
+                            .to_string()
+                            + "-inlining-transformed",
+                    );
+                    let mut before_file_inlining = File::create(before_file_inlining_path)?;
+                    write!(&mut before_file_inlining, "{}", before)?;
+                    let after_file_inlining_path = after_file.with_file_name(
+                        after_file
+                            .file_name()
+                            .unwrap()
+                            .to_str()
+                            .unwrap()
+                            .to_string()
+                            + "-inlining-transformed",
+                    );
+                    let mut after_file_inlining = File::create(after_file_inlining_path)?;
+                    write!(&mut after_file_inlining, "{}", after)?;
+                }
+
                 Diff::from(diff_tree(before, after))
             }
         };
