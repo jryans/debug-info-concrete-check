@@ -61,22 +61,14 @@ fn gather_inlined_call_edges(trace: &Trace<'_>) -> HashSet<CallEdge> {
 fn cluster_inlined_call_children(trace: &mut Trace<'_>, inlined_call_edges: &HashSet<CallEdge>) {
     let mut inlined_call_edge_to_first_instance: HashMap<CallEdge, TreeNodeIndex> = HashMap::new();
     let mut current_parent: Option<TreeNodeIndex> = None;
-    // Collect breadth-first indices to avoid `trace.tree` borrow conflict.
-    // We carefully loop through these breadth-first node indices using a ... "meta-index",
-    // as we need to mutate the node indices inside the loop to maintain breadth-first
-    // order after moving nodes.
-    let mut bfs_indices: Vec<_> = trace.tree.bfs().map(|node| node.index).collect();
-    let mut bfs_indices_len = bfs_indices.len();
-    // println!("len: {}", bfs_indices_len);
-    let mut i: usize = 0;
-    // Proceed through the tree breadth-first
-    while i < bfs_indices_len {
-        let node_index = bfs_indices[i];
-        // println!("i: {}, node: {:?}", i, node_index);
+    // Proceed through the tree breadth-first using mutable iterator
+    for (tree, node_index) in trace.tree.bfs_mut() {
+        // println!("node: {:?}", node_index);
         let event = {
-            let node = &trace.tree[&node_index];
+            let node = &tree[&node_index];
             // If we've changed parents, clear past state of call edges
             if node.parent != current_parent {
+                // println!("Parent changed, reset call edge instance map");
                 inlined_call_edge_to_first_instance.clear();
                 current_parent = node.parent;
             }
@@ -87,20 +79,18 @@ fn cluster_inlined_call_children(trace: &mut Trace<'_>, inlined_call_edges: &Has
             // The current trace's call edges might not be inlined themselves,
             // so we also check with previously gathered set
             if !inlined_call_edges.contains(&edge) {
-                i += 1;
                 continue;
             }
             // If this edge is new for this parent,
             // track it as we may move children of other instances here
             if !inlined_call_edge_to_first_instance.contains_key(&edge) {
                 inlined_call_edge_to_first_instance.insert(edge, node_index);
-                i += 1;
                 continue;
             }
             // When an inlined call edge is found multiple times within the same parent, move all
             // children of subsequent matching call edges to the first instance of that edge
             let mut children = {
-                let node = &mut trace.tree[&node_index];
+                let node = &mut tree[&node_index];
                 let cloned_children = node.children.clone();
                 node.children.clear();
                 cloned_children
@@ -113,13 +103,13 @@ fn cluster_inlined_call_children(trace: &mut Trace<'_>, inlined_call_edges: &Has
             // );
             // Update child to parent link in each child
             for child in &children {
-                trace.tree[child].parent = Some(new_children_parent_index);
+                tree[child].parent = Some(new_children_parent_index);
             }
-            let new_children_parent = &mut trace.tree[&new_children_parent_index];
+            let new_children_parent = &mut tree[&new_children_parent_index];
             new_children_parent.children.append(&mut children);
             // The current node is no longer needed, so remove from its parent
-            let parent_index = trace.tree[&node_index].parent.unwrap();
-            let parent = &mut trace.tree[&parent_index];
+            let parent_index = tree[&node_index].parent.unwrap();
+            let parent = &mut tree[&parent_index];
             let current_position = parent
                 .children
                 .iter()
@@ -130,24 +120,7 @@ fn cluster_inlined_call_children(trace: &mut Trace<'_>, inlined_call_edges: &Has
             //     "Removed current node {:?} from its parent {:?}",
             //     node_index, parent_index
             // );
-            // Expensive check, would be nice to formally prove this correct instead...!
-            // Verify breadth-first indices have been updated to match what we'd get by
-            // by re-collecting the indices.
-            // assert_eq!(
-            //     bfs_indices,
-            //     trace.tree.bfs().map(|node| node.index).collect::<Vec<_>>()
-            // );
-            // JRS: This is an expensive recomputation...
-            // For now, let's go with it, as more efficient approaches seem like they'd
-            // involve a lot more fiddly state tracking.
-            // JRS: Maybe if we were able to fix up the BFS stack while iterating...?
-            bfs_indices = trace.tree.bfs().map(|node| node.index).collect();
-            bfs_indices_len = bfs_indices.len();
-            // println!("len: {}", bfs_indices_len);
-            // Since we removed the current node, we want to visit this index again
-            continue;
         }
-        i += 1;
     }
     // println!();
 }

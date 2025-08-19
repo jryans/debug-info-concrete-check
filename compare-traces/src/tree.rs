@@ -198,6 +198,13 @@ impl Tree {
         }
     }
 
+    pub fn bfs_mut(&mut self) -> TreeBfsMut {
+        TreeBfsMut {
+            tree: self,
+            queue: VecDeque::from([TreeBfsMutStep::VisitNode(Tree::root_index())]),
+        }
+    }
+
     pub fn dfs_pre_order(&self) -> TreeDfsPreOrder {
         TreeDfsPreOrder {
             tree: self,
@@ -272,6 +279,70 @@ impl<'tree> Iterator for TreeBfs<'tree> {
                     continue;
                 }
                 return Some(node);
+            }
+        }
+
+        return None;
+    }
+}
+
+#[derive(Debug)]
+enum TreeBfsMutStep {
+    VisitNode(TreeNodeIndex),
+    CollectChildren(TreeNodeIndex),
+}
+
+pub struct TreeBfsMut<'tree> {
+    tree: &'tree mut Tree,
+    queue: VecDeque<TreeBfsMutStep>,
+}
+
+impl<'tree> Iterator for TreeBfsMut<'tree> {
+    type Item = (&'tree mut Tree, TreeNodeIndex);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.queue.is_empty() {
+            return None;
+        }
+
+        while !self.queue.is_empty() {
+            // Pop from the back of the queue
+            let step = self.queue.pop_back().unwrap();
+            match step {
+                TreeBfsMutStep::VisitNode(node_index) => {
+                    let node = &self.tree[&node_index];
+                    if node.is_leaf() {
+                        // If `node` is a leaf, stop here for now
+                        // Unsafe: `tree` reference outlives the iterator,
+                        // but can't see how to express that in safe Rust.
+                        let tree: &mut Tree = unsafe { &mut *(self.tree as *mut Tree) };
+                        return Some((tree, node_index));
+                    } else {
+                        // If `node` is a branch, push a future step to gather children.
+                        // This allows visiting the current node to potentially change its children
+                        // and see that reflected in the same iteration round (as long as they
+                        // don't move up the tree to levels we've already visited).
+                        self.queue
+                            .push_front(TreeBfsMutStep::CollectChildren(node_index));
+                        // For all non-root branches, stop here for now
+                        if node_index.is_root() {
+                            continue;
+                        }
+                        // Unsafe: `tree` reference outlives the iterator,
+                        // but can't see how to express that in safe Rust.
+                        let tree: &mut Tree = unsafe { &mut *(self.tree as *mut Tree) };
+                        return Some((tree, node_index));
+                    }
+                }
+                TreeBfsMutStep::CollectChildren(node_index) => {
+                    // Now that this step has made it to the top of the queue,
+                    // we finally commit to the current list of children for this node
+                    let node = &self.tree[&node_index];
+                    for i in (0..node.children.len()).rev() {
+                        self.queue
+                            .push_back(TreeBfsMutStep::VisitNode(node.children[i]));
+                    }
+                }
             }
         }
 
