@@ -1029,7 +1029,7 @@ pub fn diff_tree<'content>(
             };
             // Add to the before tree
             let before_tree_position = before_events.len();
-            before.lines.push(after_node.data(&after.lines).clone());
+            before.lines.push(*after_node.data(&after.lines));
             before_events.push(after_node.data(&after_events).clone());
             // JRS: Do we need to attach partners when applying add operations...?
             // We don't need to worry about labels at this stage,
