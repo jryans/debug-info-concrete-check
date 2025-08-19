@@ -392,10 +392,6 @@ pub struct TreeDiff<'content> {
 struct FuzzyEvent(Event);
 
 impl FuzzyEvent {
-    fn attach_partner(&mut self, partner: &Self) {
-        self.0.attach_partner(&partner.0);
-    }
-
     fn self_eq(a: &Event, b: &Event) -> bool {
         if a == b {
             return true;
@@ -1265,13 +1261,13 @@ CF: system_path at exec-cmd.c:265:6
 
     #[test]
     fn tree_fuzzy_ne_partner() {
-        let mut event_1 = FuzzyEvent(Event::parse("CF: system_path at exec-cmd.c:265:6").unwrap());
-        let event_1p = FuzzyEvent(Event::parse("CT: foo at foo.c:0:0").unwrap());
+        let mut event_1 = Event::parse("CF: system_path at exec-cmd.c:265:6").unwrap();
+        let event_1p = Event::parse("CT: foo at foo.c:0:0").unwrap();
         event_1.attach_partner(&event_1p);
-        let mut event_2 = FuzzyEvent(Event::parse("CF: system_path at exec-cmd.c:265:6").unwrap());
-        let event_2p = FuzzyEvent(Event::parse("CT: bob at bob.c:0:0").unwrap());
+        let mut event_2 = Event::parse("CF: system_path at exec-cmd.c:265:6").unwrap();
+        let event_2p = Event::parse("CT: bob at bob.c:0:0").unwrap();
         event_2.attach_partner(&event_2p);
-        assert_ne!(event_1, event_2);
+        assert_ne!(FuzzyEvent(event_1), FuzzyEvent(event_2));
     }
 
     #[test]
