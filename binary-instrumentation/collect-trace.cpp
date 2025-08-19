@@ -80,7 +80,7 @@ bool currInstMayBeTailCall = false;
 bool currInstIsTailCall = false;
 bool currInstIsBranch = false;
 bool currInstIsReturn = false;
-QBDI::rword prevAddress = 0;
+QBDI::rword prevAddressWithoutBranch = 0;
 QBDI::rword prevCallReturnTarget = 0;
 QBDI::rword nextAddressAfterCurrInst = 0;
 
@@ -711,7 +711,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
         // For the first inlined frame we return from,
         // we can make use of the previous instruction to approximate
         // source coordinates
-        printReturnFromEventForInlinedAddress(prevAddress);
+        printReturnFromEventForInlinedAddress(prevAddressWithoutBranch);
         firstFrameToPop = false;
       } else {
         printReturnFromEventForInlinedEntry(stack.back().entry);
@@ -806,8 +806,10 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
                            address, vm);
   }
 
-  // Store address for potential use by next instruction
-  prevAddress = address;
+  // Store non-branch (avoiding jumps to external code)
+  // address for potential use by next instruction
+  if (!currInstIsBranch)
+    prevAddressWithoutBranch = address;
 
   return QBDI::CONTINUE;
 }
