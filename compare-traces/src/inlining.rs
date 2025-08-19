@@ -15,10 +15,28 @@ fn event_to_call_edge(event: &Event) -> Option<CallEdge> {
         return None;
     }
     let call_from_event = event;
+    let from_location = &call_from_event.location;
+    // Call from event must have full set of coordinates
+    if from_location.function.is_none()
+        || from_location.file.is_none()
+        || from_location.line.is_none()
+        || from_location.column.is_none()
+    {
+        return None;
+    }
+    // Call from line must be non-zero
+    if from_location.line.unwrap() == 0 {
+        return None;
+    }
     assert!(call_from_event.partner.is_some());
     let partner_event = call_from_event.partner.as_ref().unwrap();
     assert!(partner_event.event_type == EventType::CallTo);
     let call_to_event = partner_event;
+    let to_location = &call_to_event.location;
+    // Call to event only needs to have function name
+    if to_location.function.is_none() {
+        return None;
+    }
     Some(CallEdge {
         from_location: call_from_event.location.clone(),
         to_function: call_to_event.location.function.as_ref().unwrap().clone(),
