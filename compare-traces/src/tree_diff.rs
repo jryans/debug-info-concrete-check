@@ -211,8 +211,8 @@ impl TreeEditOp {
     fn to_diff_ops(&self, before_tree: &Tree, after_tree: &Tree) -> Vec<DiffOp> {
         match self {
             TreeEditOp::Add {
-                parent_index,
-                child_position,
+                parent_index: _,
+                child_position: _,
                 after_index,
             } => vec![DiffOp::Insert {
                 old_index: {
