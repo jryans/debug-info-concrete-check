@@ -193,21 +193,21 @@ impl Tree {
 
     pub fn bfs(&self) -> TreeBfs {
         TreeBfs {
-            tree: &self,
+            tree: self,
             queue: VecDeque::from([self.root()]),
         }
     }
 
     pub fn dfs_pre_order(&self) -> TreeDfsPreOrder {
         TreeDfsPreOrder {
-            tree: &self,
+            tree: self,
             stack: Vec::from([self.root()]),
         }
     }
 
     pub fn dfs_pre_order_with_depth(&self) -> TreeDfsPreOrderWithDepth {
         TreeDfsPreOrderWithDepth {
-            tree: &self,
+            tree: self,
             // Depth is 1-based for actual events,
             // so root is one less than that.
             stack: Vec::from([(self.root(), 0)]),
@@ -216,7 +216,7 @@ impl Tree {
 
     pub fn dfs_post_order(&self) -> TreeDfsPostOrder {
         TreeDfsPostOrder {
-            tree: &self,
+            tree: self,
             stack: Vec::from([self.root()]),
             visited: HashSet::new(),
         }
