@@ -167,8 +167,11 @@ fn main() -> Result<()> {
                 preprocess_inlining(&mut before, &mut after);
 
                 if cli.save_after_inlining_transform {
-                    let before_file_inlining_path = before_file.with_file_name(
-                        before_file
+                    assert!(cli.before_file_or_dir.is_dir());
+                    assert!(cli.after_file_or_dir.is_dir());
+                    let mut before_file_inlining_dir = before_file.parent().unwrap().to_path_buf();
+                    before_file_inlining_dir.set_file_name(
+                        before_file_inlining_dir
                             .file_name()
                             .unwrap()
                             .to_str()
@@ -176,10 +179,14 @@ fn main() -> Result<()> {
                             .to_string()
                             + "-inlining-transformed",
                     );
+                    fs::create_dir_all(&before_file_inlining_dir)?;
+                    let before_file_inlining_path =
+                        before_file_inlining_dir.join(before_file.file_name().unwrap());
                     let mut before_file_inlining = File::create(before_file_inlining_path)?;
                     write!(&mut before_file_inlining, "{}", before)?;
-                    let after_file_inlining_path = after_file.with_file_name(
-                        after_file
+                    let mut after_file_inlining_dir = after_file.parent().unwrap().to_path_buf();
+                    after_file_inlining_dir.set_file_name(
+                        after_file_inlining_dir
                             .file_name()
                             .unwrap()
                             .to_str()
@@ -187,6 +194,9 @@ fn main() -> Result<()> {
                             .to_string()
                             + "-inlining-transformed",
                     );
+                    fs::create_dir_all(&after_file_inlining_dir)?;
+                    let after_file_inlining_path =
+                        after_file_inlining_dir.join(after_file.file_name().unwrap());
                     let mut after_file_inlining = File::create(after_file_inlining_path)?;
                     write!(&mut after_file_inlining, "{}", after)?;
                 }
