@@ -54,6 +54,8 @@ pub struct Divergence {
     pass_responsible: Option<String>,
 
     // Excluded from key (intended for trace debugging)
+    before_file_path: Option<PathBuf>,
+    after_file_path: Option<PathBuf>,
     // 1-based line indices
     old_index: usize,
     new_index: usize,
@@ -71,6 +73,8 @@ impl Divergence {
             before_events,
             after_events,
             pass_responsible: None,
+            before_file_path: None,
+            after_file_path: None,
             old_index: diff_op.old_range().start + 1,
             new_index: diff_op.new_range().start + 1,
         }
@@ -809,9 +813,10 @@ impl DivergenceAnalysis {
             // Check events against known divergence patterns
             let mut new_divergences = check_for_known_divergences(diff, &mut grouped_events);
             for divergence in &mut new_divergences {
-                if log_enabled!(log::Level::Debug) {
-                    println!("{:#?}", divergence);
-                    println!();
+                // If we'll print example trace lines, record trace path
+                if log_enabled!(log::Level::Info) {
+                    divergence.before_file_path = diff.before_file_path.clone();
+                    divergence.after_file_path = diff.after_file_path.clone();
                 }
 
                 // Look for optimisation remarks at divergence coordinates
@@ -827,6 +832,11 @@ impl DivergenceAnalysis {
                             divergence.pass_responsible = Some(remark.pass.clone());
                         }
                     }
+                }
+
+                if log_enabled!(log::Level::Debug) {
+                    println!("{:#?}", divergence);
+                    println!();
                 }
 
                 // Insert or update stats for these source coordinates
@@ -863,9 +873,16 @@ impl DivergenceAnalysis {
                 println!("  Pass responsible: {}", pass);
             }
             if log_enabled!(log::Level::Info) {
+                println!("  Example trace lines:");
                 println!(
-                    "  Example trace lines: -{}, +{}",
-                    divergence.old_index, divergence.new_index
+                    "    -{}:{}",
+                    divergence.before_file_path.as_ref().unwrap().display(),
+                    divergence.old_index
+                );
+                println!(
+                    "    +{}:{}",
+                    divergence.after_file_path.as_ref().unwrap().display(),
+                    divergence.new_index
                 );
             }
             println!();
@@ -944,16 +961,16 @@ mod tests {
         // Example diff:
         // < CF: getnanotime at trace.c:397:18
         // > CF: getnanotime at trace.c:0:0
-        let diff = Diff {
-            before_lines: Vec::from(["CF: getnanotime at trace.c:397:18"]),
-            after_lines: Vec::from(["CF: getnanotime at trace.c:0:0"]),
-            grouped_diff_ops: Vec::from([Vec::from([DiffOp::Replace {
+        let diff = Diff::new(
+            Vec::from(["CF: getnanotime at trace.c:397:18"]),
+            Vec::from(["CF: getnanotime at trace.c:0:0"]),
+            Vec::from([Vec::from([DiffOp::Replace {
                 old_index: 0,
                 old_len: 1,
                 new_index: 0,
                 new_len: 1,
             }])]),
-        };
+        );
         let change_tuples_events = Vec::from([
             (
                 ChangeTag::Delete,
@@ -991,16 +1008,16 @@ mod tests {
         // Example diff:
         // < CT: xstrdup_or_null at git-compat-util.h:1168:0
         // > CT: xstrdup_or_null at git-compat-util.h:1169:9
-        let diff = Diff {
-            before_lines: Vec::from(["CT: xstrdup_or_null at git-compat-util.h:1168:0"]),
-            after_lines: Vec::from(["CT: xstrdup_or_null at git-compat-util.h:1169:9"]),
-            grouped_diff_ops: Vec::from([Vec::from([DiffOp::Replace {
+        let diff = Diff::new(
+            Vec::from(["CT: xstrdup_or_null at git-compat-util.h:1168:0"]),
+            Vec::from(["CT: xstrdup_or_null at git-compat-util.h:1169:9"]),
+            Vec::from([Vec::from([DiffOp::Replace {
                 old_index: 0,
                 old_len: 1,
                 new_index: 0,
                 new_len: 1,
             }])]),
-        };
+        );
         let change_tuples_events = Vec::from([
             (
                 ChangeTag::Delete,
@@ -1041,24 +1058,24 @@ mod tests {
         // >   CT: Jump to external code for _vsnprintf
         // <   RF: Jump to external code for ___vsnprintf_chk
         // >   RF: Jump to external code for _vsnprintf
-        let diff = Diff {
-            before_lines: Vec::from([
+        let diff = Diff::new(
+            Vec::from([
                 "CF: strbuf_vaddf at strbuf.c:397:8",
                 "  CT: Jump to external code for ___vsnprintf_chk",
                 "  RF: Jump to external code for ___vsnprintf_chk",
             ]),
-            after_lines: Vec::from([
+            Vec::from([
                 "CF: strbuf_vaddf at strbuf.c:397:8",
                 "  CT: Jump to external code for _vsnprintf",
                 "  RF: Jump to external code for _vsnprintf",
             ]),
-            grouped_diff_ops: Vec::from([Vec::from([DiffOp::Replace {
+            Vec::from([Vec::from([DiffOp::Replace {
                 old_index: 1,
                 old_len: 2,
                 new_index: 1,
                 new_len: 2,
             }])]),
-        };
+        );
         let change_tuples_events = Vec::from([
             (
                 ChangeTag::Delete,
@@ -1092,19 +1109,19 @@ mod tests {
         // - CF: strbuf_init at strbuf.c:57:2
         // -   CT: Jump to external code
         // -   RF: Jump to external code
-        let diff = Diff {
-            before_lines: Vec::from([
+        let diff = Diff::new(
+            Vec::from([
                 "CF: strbuf_init at strbuf.c:57:2",
                 "  CT: Jump to external code",
                 "  RF: Jump to external code",
             ]),
-            after_lines: Vec::from([]),
-            grouped_diff_ops: Vec::from([Vec::from([DiffOp::Delete {
+            Vec::from([]),
+            Vec::from([Vec::from([DiffOp::Delete {
                 old_index: 0,
                 old_len: 3,
                 new_index: 0,
             }])]),
-        };
+        );
         let change_tuples_events = Vec::from([(
             ChangeTag::Delete,
             diff.before_lines
@@ -1132,8 +1149,8 @@ mod tests {
         // - CF: init_repository_format at setup.c:712:2
         // -   CT: Jump to external code
         // -   RF: Jump to external code
-        let diff = Diff {
-            before_lines: Vec::from([
+        let diff = Diff::new(
+            Vec::from([
                 "CF: init_repository_format at setup.c:710:33",
                 "  CT: Jump to external code",
                 "  RF: Jump to external code",
@@ -1141,13 +1158,13 @@ mod tests {
                 "  CT: Jump to external code",
                 "  RF: Jump to external code",
             ]),
-            after_lines: Vec::from([]),
-            grouped_diff_ops: Vec::from([Vec::from([DiffOp::Delete {
+            Vec::from([]),
+            Vec::from([Vec::from([DiffOp::Delete {
                 old_index: 0,
                 old_len: 6,
                 new_index: 0,
             }])]),
-        };
+        );
         let change_tuples_events = Vec::from([(
             ChangeTag::Delete,
             diff.before_lines
@@ -1173,19 +1190,19 @@ mod tests {
         // - CF: is_absolute_path at cache.h:1276:32
         // -   CT: git_has_dos_drive_prefix at git-compat-util.h:432:0
         // -   RF: git_has_dos_drive_prefix at git-compat-util.h:433:2
-        let diff = Diff {
-            before_lines: Vec::from([
+        let diff = Diff::new(
+            Vec::from([
                 "CF: is_absolute_path at cache.h:1276:32",
                 "  CT: git_has_dos_drive_prefix at git-compat-util.h:432:0",
                 "  RF: git_has_dos_drive_prefix at git-compat-util.h:433:2",
             ]),
-            after_lines: Vec::from([]),
-            grouped_diff_ops: Vec::from([Vec::from([DiffOp::Delete {
+            Vec::from([]),
+            Vec::from([Vec::from([DiffOp::Delete {
                 old_index: 0,
                 old_len: 3,
                 new_index: 0,
             }])]),
-        };
+        );
         let change_tuples_events = Vec::from([(
             ChangeTag::Delete,
             diff.before_lines

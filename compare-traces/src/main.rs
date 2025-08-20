@@ -154,7 +154,7 @@ fn main() -> Result<()> {
             continue;
         }
 
-        let diff: Diff = match cli.diff_strategy {
+        let mut diff: Diff = match cli.diff_strategy {
             DiffStrategy::Text => Diff::from(
                 TextDiff::configure()
                     .algorithm(similar::Algorithm::Patience)
@@ -194,6 +194,9 @@ fn main() -> Result<()> {
                 Diff::from(diff_tree(before, after))
             }
         };
+
+        diff.before_file_path = Some(before_file.clone());
+        diff.after_file_path = Some(after_file.clone());
 
         if cli.diff {
             print_diff(&diff);

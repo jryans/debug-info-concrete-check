@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use similar::{group_diff_ops, DiffOp, TextDiff};
 
 use crate::tree_diff::TreeDiff;
@@ -5,27 +7,45 @@ use crate::tree_diff::TreeDiff;
 #[derive(Debug)]
 // JRS: Could be a trait instead of struct...?
 pub struct Diff<'content> {
+    pub before_file_path: Option<PathBuf>,
+    pub after_file_path: Option<PathBuf>,
     pub before_lines: Vec<&'content str>,
     pub after_lines: Vec<&'content str>,
     pub grouped_diff_ops: Vec<Vec<DiffOp>>,
 }
 
+impl<'content> Diff<'content> {
+    pub fn new(
+        before_lines: Vec<&'content str>,
+        after_lines: Vec<&'content str>,
+        grouped_diff_ops: Vec<Vec<DiffOp>>,
+    ) -> Self {
+        Diff {
+            before_file_path: None,
+            after_file_path: None,
+            before_lines,
+            after_lines,
+            grouped_diff_ops,
+        }
+    }
+}
+
 impl<'content> From<TextDiff<'content, 'content, 'content, str>> for Diff<'content> {
     fn from(text_diff: TextDiff<'content, 'content, 'content, str>) -> Self {
-        Diff {
-            before_lines: text_diff.old_slices().to_vec(),
-            after_lines: text_diff.new_slices().to_vec(),
-            grouped_diff_ops: group_diff_ops(text_diff.ops().to_vec(), 1),
-        }
+        Diff::new(
+            text_diff.old_slices().to_vec(),
+            text_diff.new_slices().to_vec(),
+            group_diff_ops(text_diff.ops().to_vec(), 1),
+        )
     }
 }
 
 impl<'content> From<TreeDiff<'content>> for Diff<'content> {
     fn from(tree_diff: TreeDiff<'content>) -> Self {
-        Diff {
-            before_lines: tree_diff.before_lines,
-            after_lines: tree_diff.after_lines,
-            grouped_diff_ops: tree_diff.grouped_diff_ops,
-        }
+        Diff::new(
+            tree_diff.before_lines,
+            tree_diff.after_lines,
+            tree_diff.grouped_diff_ops,
+        )
     }
 }
