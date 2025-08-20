@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -182,8 +182,10 @@ fn main() -> Result<()> {
                     fs::create_dir_all(&before_file_inlining_dir)?;
                     let before_file_inlining_path =
                         before_file_inlining_dir.join(before_file.file_name().unwrap());
-                    let mut before_file_inlining = File::create(before_file_inlining_path)?;
+                    let mut before_file_inlining =
+                        BufWriter::new(File::create(before_file_inlining_path)?);
                     write!(&mut before_file_inlining, "{}", before)?;
+                    before_file_inlining.flush()?;
                     let mut after_file_inlining_dir = after_file.parent().unwrap().to_path_buf();
                     after_file_inlining_dir.set_file_name(
                         after_file_inlining_dir
@@ -197,8 +199,10 @@ fn main() -> Result<()> {
                     fs::create_dir_all(&after_file_inlining_dir)?;
                     let after_file_inlining_path =
                         after_file_inlining_dir.join(after_file.file_name().unwrap());
-                    let mut after_file_inlining = File::create(after_file_inlining_path)?;
+                    let mut after_file_inlining =
+                        BufWriter::new(File::create(after_file_inlining_path)?);
                     write!(&mut after_file_inlining, "{}", after)?;
+                    after_file_inlining.flush()?;
                 }
 
                 Diff::from(diff_tree(before, after))
