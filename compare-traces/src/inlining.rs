@@ -310,5 +310,9 @@ ICF: strbuf_vaddf at strbuf.c:395:3
         // println!();
 
         assert_eq!(format!("{}", trace).trim(), expected);
+
+        // Should be the same after renumbering as well
+        trace.renumber();
+        assert_eq!(format!("{}", trace).trim(), expected);
     }
 }

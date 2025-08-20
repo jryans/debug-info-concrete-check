@@ -164,9 +164,17 @@ fn main() -> Result<()> {
             DiffStrategy::Tree => {
                 let mut before = Trace::parse(&before_content);
                 let mut after = Trace::parse(&after_content);
+
                 preprocess_inlining(&mut before, &mut after);
 
                 if cli.save_after_inlining_transform {
+                    // If we'll also print example trace lines,
+                    // re-number after inlining transform to match these separately saved files
+                    if log_enabled!(log::Level::Info) {
+                        before.renumber();
+                        after.renumber();
+                    }
+
                     assert!(cli.before_file_or_dir.is_dir());
                     assert!(cli.after_file_or_dir.is_dir());
                     let mut before_file_inlining_dir = before_file.parent().unwrap().to_path_buf();
