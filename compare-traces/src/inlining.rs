@@ -28,7 +28,10 @@ fn event_to_call_edge(event: &Event) -> Option<CallEdge> {
     if from_location.line.unwrap() == 0 {
         return None;
     }
-    assert!(call_from_event.partner.is_some());
+    if call_from_event.partner.is_none() {
+        println!("⚠️ Call from event without partner: {}", call_from_event);
+        return None;
+    }
     let partner_event = call_from_event.partner.as_ref().unwrap();
     assert!(partner_event.event_type == EventType::CallTo);
     let call_to_event = partner_event;
