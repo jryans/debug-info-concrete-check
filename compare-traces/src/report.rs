@@ -26,7 +26,7 @@ enum DivergenceType {
     LibraryCallRemoved,
     // TODO: Refine this by pass, similar to the paper
     ProgramCallRemoved,
-    UnexpectedReturnAdded,
+    InlinedReturnAdded,
     Uncategorised,
 }
 
@@ -40,7 +40,7 @@ impl DivergenceType {
             DivergenceType::LibraryCallReplaced => "library-call-replaced",
             DivergenceType::LibraryCallRemoved => "library-call-removed",
             DivergenceType::ProgramCallRemoved => "program-call-removed",
-            DivergenceType::UnexpectedReturnAdded => "unexpected-return-added",
+            DivergenceType::InlinedReturnAdded => "inlined-return-added",
             DivergenceType::Uncategorised => "uncategorised",
         }
     }
@@ -550,7 +550,7 @@ fn check_for_program_call_removed(
 
 // Example diff:
 // + IRF: check_commit at object-file.c:0:0
-fn check_for_unexpected_return_added(
+fn check_for_inlined_return_added(
     grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
@@ -585,7 +585,7 @@ fn check_for_unexpected_return_added(
         related_after_events.push(events.pop_front().unwrap());
 
         divergences.push(Divergence::new(
-            DivergenceType::UnexpectedReturnAdded,
+            DivergenceType::InlinedReturnAdded,
             related_before_events,
             related_after_events,
             diff_op,
@@ -647,7 +647,7 @@ fn check_for_known_divergences(
             }
         }
         {
-            let mut divergences_found = check_for_unexpected_return_added(grouped_events);
+            let mut divergences_found = check_for_inlined_return_added(grouped_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
                 continue;
