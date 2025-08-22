@@ -80,7 +80,7 @@ bool currInstMayBeTailCall = false;
 bool currInstIsTailCall = false;
 bool currInstIsBranch = false;
 bool currInstIsReturn = false;
-QBDI::rword prevAddressWithoutBranch = 0;
+std::optional<QBDI::rword> prevSameFrameAddress = std::nullopt;
 QBDI::rword prevCallReturnTarget = 0;
 QBDI::rword nextAddressAfterCurrInst = 0;
 
@@ -708,11 +708,14 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       }
       assert(stack.back().isInlined);
       if (firstFrameToPop) {
-        // For the first inlined frame we return from,
-        // we can make use of the previous instruction to approximate
-        // source coordinates
-        printReturnFromEventForInlinedAddress(prevAddressWithoutBranch);
         firstFrameToPop = false;
+        // For the first inlined frame we return from,
+        // we may be able to make use of the previous instruction to approximate
+        // source coordinates
+        if (prevSameFrameAddress)
+          printReturnFromEventForInlinedAddress(*prevSameFrameAddress);
+        else
+          printReturnFromEventForInlinedEntry(stack.back().entry);
       } else {
         printReturnFromEventForInlinedEntry(stack.back().entry);
       }
@@ -806,10 +809,15 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
                            address, vm);
   }
 
-  // Store non-branch (avoiding jumps to external code)
-  // address for potential use by next instruction
-  if (!currInstIsBranch)
-    prevAddressWithoutBranch = address;
+  // Store address for potential use by next instruction,
+  // but only if it won't change (native) stack depth.
+  // This avoids jumps to external code,
+  // calls / returns which would confuse usage of this as
+  // an inlined coordinate, etc.
+  if (!stackDepthMayChange)
+    prevSameFrameAddress = address;
+  else
+    prevSameFrameAddress = std::nullopt;
 
   return QBDI::CONTINUE;
 }
