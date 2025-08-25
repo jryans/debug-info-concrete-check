@@ -1077,7 +1077,7 @@ pub fn diff_tree<'content>(
     }
 
     // JRS: We used to apply the delete ops to the before tree here,
-    // but this completes counting the size of before sub-trees.
+    // but this complicates counting the size of before sub-trees.
     // Since we don't actually need to keep editing the before tree
     // for correct positions (since the delete phase is last),
     // we skip applying these edits for now.
