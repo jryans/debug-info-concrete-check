@@ -633,8 +633,8 @@ fn check_for_inlined_return_added(
         let (change_tag, events) = &mut change_tuples_events[0];
         assert!(*change_tag == ChangeTag::Insert);
 
-        // Must have only 1 event (extra conservative, will miss adjacent diffs)
-        if events.len() != 1 {
+        // Must have at least 1 event
+        if events.len() < 1 {
             continue;
         };
 

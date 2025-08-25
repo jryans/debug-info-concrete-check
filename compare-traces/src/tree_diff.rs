@@ -360,22 +360,34 @@ fn compact_diff_ops(grouped_diff_ops: &mut Vec<Vec<DiffOp>>) {
         }
         let current_op = current_op_group[0];
         let next_op = next_op_group[0];
-        // Compaction supports `Replace` ops only
-        if current_op.tag() != DiffTag::Replace {
+        // If ops are adjacent, compaction can proceed
+        if current_op.old_range().end != next_op.old_range().start
+            || current_op.new_range().end != next_op.new_range().start
+        {
             continue;
         }
-        // Compact `Replace` op if adjacent
-        if current_op.old_range().end == next_op.old_range().start {
-            let compacted_op_group = vec![DiffOp::Replace {
+        let compacted_op = match current_op.tag() {
+            DiffTag::Delete => DiffOp::Delete {
+                old_index: current_op.old_range().start,
+                old_len: current_op.old_range().len() + next_op.old_range().len(),
+                new_index: current_op.new_range().start,
+            },
+            DiffTag::Insert => DiffOp::Insert {
+                old_index: current_op.old_range().start,
+                new_index: current_op.new_range().start,
+                new_len: current_op.new_range().len() + next_op.new_range().len(),
+            },
+            DiffTag::Replace => DiffOp::Replace {
                 old_index: current_op.old_range().start,
                 old_len: current_op.old_range().len() + next_op.old_range().len(),
                 new_index: current_op.new_range().start,
                 new_len: current_op.new_range().len() + next_op.new_range().len(),
-            }];
-            grouped_diff_ops[i] = compacted_op_group;
-            // TODO: Use a different data structure to make this more efficient...?
-            grouped_diff_ops.remove(i + 1);
-        }
+            },
+            DiffTag::Equal => unreachable!(),
+        };
+        grouped_diff_ops[i] = vec![compacted_op];
+        // TODO: Use a different data structure to make this more efficient...?
+        grouped_diff_ops.remove(i + 1);
     }
 }
 
