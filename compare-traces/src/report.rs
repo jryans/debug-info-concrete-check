@@ -27,6 +27,7 @@ enum DivergenceType {
     // TODO: Refine this by pass, similar to the paper
     ProgramCallRemoved,
     InlinedReentryAdded,
+    InlinedNoiseAdded,
     InlinedReturnAdded,
     Uncategorised,
 }
@@ -42,6 +43,7 @@ impl DivergenceType {
             DivergenceType::LibraryCallRemoved => "library-call-removed",
             DivergenceType::ProgramCallRemoved => "program-call-removed",
             DivergenceType::InlinedReentryAdded => "inlined-reentry-added",
+            DivergenceType::InlinedNoiseAdded => "inlined-noise-added",
             DivergenceType::InlinedReturnAdded => "inlined-return-added",
             DivergenceType::Uncategorised => "uncategorised",
         }
@@ -616,6 +618,71 @@ fn check_for_inlined_reentry_added(
 }
 
 // Example diff:
+// + ICT: get_builtin at git.c:635:0
+// + IRF: get_builtin at git.c:0:0
+fn check_for_inlined_noise_added(
+    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
+) -> Vec<Divergence> {
+    let mut divergences = vec![];
+
+    for (diff_op, change_tuples_events) in grouped_events {
+        // Diff op for this region should be insert
+        if diff_op.tag() != DiffTag::Insert {
+            continue;
+        }
+
+        // Should have a single tuple with inserted lines
+        assert!(change_tuples_events.len() == 1);
+        let (change_tag, events) = &mut change_tuples_events[0];
+        assert!(*change_tag == ChangeTag::Insert);
+
+        // Must have at least 2 events
+        if events.len() < 2 {
+            continue;
+        };
+
+        // First event should be inlined call to
+        if events[0].event_source != EventSource::InlinedChain {
+            continue;
+        }
+        if events[0].event_type != EventType::CallTo {
+            continue;
+        }
+
+        // Second event should be inlined return from
+        if events[1].event_source != EventSource::InlinedChain {
+            continue;
+        }
+        if events[1].event_type != EventType::ReturnFrom {
+            continue;
+        }
+
+        // Events should have the same function name
+        if events[0].location.function.is_none() || events[1].location.function.is_none() {
+            continue;
+        }
+        if events[0].location.function != events[1].location.function {
+            continue;
+        }
+
+        // Extract related events
+        let related_before_events = vec![];
+        let mut related_after_events = vec![];
+        related_after_events.push(events.pop_front().unwrap());
+        related_after_events.push(events.pop_front().unwrap());
+
+        divergences.push(Divergence::new(
+            DivergenceType::InlinedNoiseAdded,
+            related_before_events,
+            related_after_events,
+            diff_op,
+        ));
+    }
+
+    divergences
+}
+
+// Example diff:
 // + IRF: check_commit at object-file.c:0:0
 fn check_for_inlined_return_added(
     grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
@@ -715,6 +782,13 @@ fn check_for_known_divergences(
         }
         {
             let mut divergences_found = check_for_inlined_reentry_added(grouped_events);
+            if !divergences_found.is_empty() {
+                divergences.append(&mut divergences_found);
+                continue;
+            }
+        }
+        {
+            let mut divergences_found = check_for_inlined_noise_added(grouped_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
                 continue;
