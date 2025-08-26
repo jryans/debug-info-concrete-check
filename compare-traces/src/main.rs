@@ -167,14 +167,15 @@ fn main() -> Result<()> {
 
                 preprocess_inlining(&mut before, &mut after);
 
-                if cli.save_after_inlining_transform {
-                    // If we'll also print example trace lines,
-                    // re-number after inlining transform to match these separately saved files
-                    if log_enabled!(log::Level::Info) {
-                        before.renumber();
-                        after.renumber();
-                    }
+                // Compacting adjacent events depends on their indices reflecting
+                // lines they'd have in printed trace, so re-numbering is required
+                // for multi-line patterns to match after the inlining transform.
+                // In addition, it makes the verbose trace easier to understand
+                // (at least when also saving the inlined transforms).
+                before.renumber();
+                after.renumber();
 
+                if cli.save_after_inlining_transform {
                     assert!(cli.before_file_or_dir.is_dir());
                     assert!(cli.after_file_or_dir.is_dir());
                     let mut before_file_inlining_dir = before_file.parent().unwrap().to_path_buf();
