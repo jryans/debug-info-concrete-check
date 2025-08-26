@@ -1121,6 +1121,11 @@ pub fn diff_tree<'content>(
         .filter(|edit_op| !matches!(edit_op, TreeEditOp::Move { .. }))
         .map(|edit_op| edit_op.to_diff_ops(&before.tree, &after.tree))
         .collect();
+    // Sort to enable more compaction opportunities, then compact adjacent ops
+    grouped_diff_ops.sort_unstable_by_key(|diff_op_group| {
+        let op = &diff_op_group[0];
+        op.old_range().start.max(op.new_range().start)
+    });
     compact_diff_ops(&mut grouped_diff_ops);
 
     TreeDiff {
@@ -1486,15 +1491,15 @@ CF: D at file.tex
         assert_eq!(
             diff.grouped_diff_ops,
             vec![
-                vec![DiffOp::Insert {
-                    old_index: 0,
-                    new_index: 9,
-                    new_len: 1,
-                }],
                 vec![DiffOp::Delete {
                     old_index: 3,
                     old_len: 1,
                     new_index: 0,
+                }],
+                vec![DiffOp::Insert {
+                    old_index: 0,
+                    new_index: 9,
+                    new_len: 1,
                 }],
             ]
         );
@@ -1716,17 +1721,17 @@ ICF: error_builtin at usage.c:81:11
                     new_len: 1
                 }],
                 vec![DiffOp::Replace {
+                    old_index: 3,
+                    old_len: 2,
+                    new_index: 3,
+                    new_len: 2
+                }],
+                vec![DiffOp::Replace {
                     old_index: 5,
                     old_len: 1,
                     new_index: 5,
                     new_len: 1
                 }],
-                vec![DiffOp::Replace {
-                    old_index: 3,
-                    old_len: 2,
-                    new_index: 3,
-                    new_len: 2
-                }]
             ]
         );
     }
