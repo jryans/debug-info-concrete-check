@@ -23,6 +23,7 @@ enum DivergenceType {
     CoordinatesChangedLarge,
     LibraryCallAdded,
     LibraryCallReplaced,
+    LibraryCallInlined,
     LibraryCallRemoved,
     // TODO: Refine this by pass, similar to the paper
     ProgramCallRemoved,
@@ -40,6 +41,7 @@ impl DivergenceType {
             DivergenceType::CoordinatesChangedLarge => "coordinates-changed-large",
             DivergenceType::LibraryCallAdded => "library-call-added",
             DivergenceType::LibraryCallReplaced => "library-call-replaced",
+            DivergenceType::LibraryCallInlined => "library-call-inlined",
             DivergenceType::LibraryCallRemoved => "library-call-removed",
             DivergenceType::ProgramCallRemoved => "program-call-removed",
             DivergenceType::InlinedReentryAdded => "inlined-reentry-added",
@@ -425,6 +427,70 @@ fn check_for_library_call_replaced(
 }
 
 // Example diff:
+// < RF: Jump to external code for bsearch
+// > IRF: bsearch at stdlib-bsearch.h:0:0
+// < CT: Jump to external code for bsearch
+// > ICT: bsearch at stdlib-bsearch.h:20:0
+fn check_for_library_call_inlined(
+    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
+) -> Vec<Divergence> {
+    let mut divergences = vec![];
+
+    for (diff_op, change_tuples_events) in grouped_events {
+        // Look for inlined external call events
+        if diff_op.tag() != DiffTag::Replace {
+            continue;
+        }
+        assert!(change_tuples_events.len() == 2);
+        let (befores, afters) = change_tuples_events.split_at_mut(1);
+        let (before_change_tag, before_events) = &mut befores[0];
+        let (after_change_tag, after_events) = &mut afters[0];
+        assert!(*before_change_tag == ChangeTag::Delete);
+        assert!(*after_change_tag == ChangeTag::Insert);
+
+        // Extract related events
+        let mut related_before_events = vec![];
+        let mut related_after_events = vec![];
+
+        // Any number of adjacent events accepted
+        while !before_events.is_empty() && !after_events.is_empty() {
+            let before_event = &before_events[0];
+            let after_event = &after_events[0];
+            // Ensure before event mentions external call
+            if !before_event.detail.to_lowercase().contains("external code") {
+                break;
+            }
+            // Ensure at least the event type and function name matches
+            if before_event.event_type != after_event.event_type {
+                break;
+            }
+            if before_event.location.function != after_event.location.function {
+                break;
+            }
+            // Ensure after event is inlined
+            if after_event.event_source != EventSource::InlinedChain {
+                break;
+            }
+            related_before_events.push(before_events.pop_front().unwrap());
+            related_after_events.push(after_events.pop_front().unwrap());
+        }
+
+        if related_before_events.is_empty() || related_after_events.is_empty() {
+            continue;
+        }
+
+        divergences.push(Divergence::new(
+            DivergenceType::LibraryCallInlined,
+            related_before_events,
+            related_after_events,
+            diff_op,
+        ));
+    }
+
+    divergences
+}
+
+// Example diff:
 // - CF: strbuf_init at strbuf.c:57:2
 // -   CT: Jump to external code
 // -   RF: Jump to external code
@@ -761,6 +827,13 @@ fn check_for_known_divergences(
         }
         {
             let mut divergences_found = check_for_library_call_replaced(diff, grouped_events);
+            if !divergences_found.is_empty() {
+                divergences.append(&mut divergences_found);
+                continue;
+            }
+        }
+        {
+            let mut divergences_found = check_for_library_call_inlined(grouped_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
                 continue;

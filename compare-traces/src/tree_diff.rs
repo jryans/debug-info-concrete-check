@@ -429,6 +429,15 @@ impl FuzzyEvent {
             ) >= 0.5;
         }
 
+        if a_loc.function.is_some()
+            && b_loc.function.is_some()
+            && (a_loc.file.is_none() || b_loc.file.is_none())
+        {
+            // Could be an inlined external code event
+            // Allow this to match as long as the function is the same
+            return a_loc.function == b_loc.function;
+        }
+
         if a_loc.function != b_loc.function || a_loc.file != b_loc.file {
             return false;
         }
