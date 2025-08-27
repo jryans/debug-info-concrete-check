@@ -559,9 +559,10 @@ fn check_for_program_call_removed(
             continue;
         }
 
-        // Event sequence should be call from, call to, return from
-        // Call to and return from should not mention external code
-        // TODO: Support more complex trees with nested calls
+        // Event sequence should be call from, call to, return from.
+        // Call to and return from should not mention external code.
+        // There may be any number of additionally removed events
+        // between the call to and return from.
         if events[0].event_type != EventType::CallFrom {
             continue;
         }
@@ -571,19 +572,31 @@ fn check_for_program_call_removed(
         if events[1].detail.to_lowercase().contains("external code") {
             continue;
         }
-        if events[2].event_type != EventType::ReturnFrom {
+        // Look for last return from the called function in this block
+        let called_function = &events[1].location.function;
+        if called_function.is_none() {
             continue;
         }
-        if events[2].detail.to_lowercase().contains("external code") {
+        let mut last_return_from: Option<usize> = None;
+        for i in 2..events.len() {
+            if events[i].event_type != EventType::ReturnFrom {
+                continue;
+            }
+            if events[i].detail.to_lowercase().contains("external code") {
+                continue;
+            }
+            if events[i].location.function != *called_function {
+                continue;
+            }
+            last_return_from = Some(i);
+        }
+        if last_return_from.is_none() {
             continue;
         }
 
         // Extract related events
-        let mut related_before_events = vec![];
+        let related_before_events = events.drain(0..=last_return_from.unwrap()).collect();
         let related_after_events = vec![];
-        related_before_events.push(events.pop_front().unwrap());
-        related_before_events.push(events.pop_front().unwrap());
-        related_before_events.push(events.pop_front().unwrap());
 
         divergences.push(Divergence::new(
             DivergenceType::ProgramCallRemoved,
@@ -1391,5 +1404,44 @@ mod tests {
             DivergenceType::ProgramCallRemoved
         );
         assert_eq!(divergence.before_events.len(), 3);
+    }
+
+    #[test]
+    fn program_call_subtree_removed() {
+        let diff = Diff::new(
+            Vec::from([
+                "CF: clear_repository_format at setup.c:730:2",
+                "  CT: init_repository_format at setup.c:709:0",
+                "  CF: init_repository_format at setup.c:710:33",
+                "    CT: Jump to external code for memset",
+                "    RF: Jump to external code for memset",
+                "  CF: init_repository_format at setup.c:712:2",
+                "    CT: Jump to external code for memcpy",
+                "    RF: Jump to external code for memcpy",
+                "  RF: init_repository_format at setup.c:713:1",
+            ]),
+            Vec::from([]),
+            Vec::from([Vec::from([DiffOp::Delete {
+                old_index: 0,
+                old_len: 9,
+                new_index: 0,
+            }])]),
+        );
+        let change_tuples_events = Vec::from([(
+            ChangeTag::Delete,
+            diff.before_lines
+                .iter()
+                .map(|str| Event::parse(str).unwrap())
+                .collect::<VecDeque<_>>(),
+        )]);
+        let mut grouped_events = [(diff.grouped_diff_ops[0][0], change_tuples_events)];
+        let divergences = check_for_known_divergences(&diff, &mut grouped_events);
+        assert_eq!(divergences.len(), 1);
+        let divergence = &divergences[0];
+        assert_eq!(
+            divergence.divergence_type,
+            DivergenceType::ProgramCallRemoved
+        );
+        assert_eq!(divergence.before_events.len(), 9);
     }
 }
