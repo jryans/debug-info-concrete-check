@@ -1127,7 +1127,7 @@ impl DivergenceAnalysis {
         println!("{} divergence occurrences", occurrences_total);
     }
 
-    pub fn print_before_events_by_type(&self, events_by_type_dir: &PathBuf) -> Result<()> {
+    pub fn print_countable_events_by_type(&self, events_by_type_dir: &PathBuf) -> Result<()> {
         let mut files_by_type: HashMap<DivergenceType, File> = HashMap::new();
         for divergence_type in enum_iterator::all::<DivergenceType>() {
             let file_path = events_by_type_dir.join(divergence_type.to_file_name());
@@ -1142,12 +1142,12 @@ impl DivergenceAnalysis {
 
         for divergence in self.divergence_stats_by_coordinates.keys() {
             let mut file = &files_by_type[&divergence.divergence_type];
-            let printable_events = match &divergence.divergence_type {
-                // In the less common case of only added events,
-                // let's use those so we at least have something to count
-                DivergenceType::LibraryCallAdded => &divergence.after_events,
-                _ => &divergence.before_events,
-            };
+            let mut printable_events = &divergence.before_events;
+            // In the less common case of only added events,
+            // let's use those so we at least have something to count
+            if printable_events.is_empty() {
+                printable_events = &divergence.after_events;
+            }
             for event in printable_events {
                 writeln!(file, "{}", event)?;
             }

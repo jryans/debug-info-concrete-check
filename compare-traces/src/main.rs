@@ -244,7 +244,7 @@ fn main() -> Result<()> {
                     events_by_type_dir.display(),
                 ));
             }
-            divergence_analysis.print_before_events_by_type(&events_by_type_dir)?;
+            divergence_analysis.print_countable_events_by_type(&events_by_type_dir)?;
         }
     }
 
