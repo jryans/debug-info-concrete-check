@@ -1157,9 +1157,6 @@ mod tests {
 
     #[test]
     fn coordinates_removed() {
-        // Example diff:
-        // < CF: getnanotime at trace.c:397:18
-        // > CF: getnanotime at trace.c:0:0
         let diff = Diff::new(
             Vec::from(["CF: getnanotime at trace.c:397:18"]),
             Vec::from(["CF: getnanotime at trace.c:0:0"]),
@@ -1204,9 +1201,6 @@ mod tests {
 
     #[test]
     fn coordinates_changed() {
-        // Example diff:
-        // < CT: xstrdup_or_null at git-compat-util.h:1168:0
-        // > CT: xstrdup_or_null at git-compat-util.h:1169:9
         let diff = Diff::new(
             Vec::from(["CT: xstrdup_or_null at git-compat-util.h:1168:0"]),
             Vec::from(["CT: xstrdup_or_null at git-compat-util.h:1169:9"]),
@@ -1251,12 +1245,6 @@ mod tests {
 
     #[test]
     fn library_call_replaced() {
-        // Example diff:
-        //   CF: strbuf_vaddf at strbuf.c:397:8
-        // <   CT: Jump to external code for ___vsnprintf_chk
-        // >   CT: Jump to external code for _vsnprintf
-        // <   RF: Jump to external code for ___vsnprintf_chk
-        // >   RF: Jump to external code for _vsnprintf
         let diff = Diff::new(
             Vec::from([
                 "CF: strbuf_vaddf at strbuf.c:397:8",
@@ -1304,10 +1292,6 @@ mod tests {
 
     #[test]
     fn library_call_removed_single() {
-        // Example diff:
-        // - CF: strbuf_init at strbuf.c:57:2
-        // -   CT: Jump to external code
-        // -   RF: Jump to external code
         let diff = Diff::new(
             Vec::from([
                 "CF: strbuf_init at strbuf.c:57:2",
@@ -1341,13 +1325,6 @@ mod tests {
 
     #[test]
     fn library_call_removed_multiple() {
-        // Example diff:
-        // - CF: init_repository_format at setup.c:710:33
-        // -   CT: Jump to external code
-        // -   RF: Jump to external code
-        // - CF: init_repository_format at setup.c:712:2
-        // -   CT: Jump to external code
-        // -   RF: Jump to external code
         let diff = Diff::new(
             Vec::from([
                 "CF: init_repository_format at setup.c:710:33",
@@ -1385,10 +1362,6 @@ mod tests {
 
     #[test]
     fn program_call_removed() {
-        // Example diff:
-        // - CF: is_absolute_path at cache.h:1276:32
-        // -   CT: git_has_dos_drive_prefix at git-compat-util.h:432:0
-        // -   RF: git_has_dos_drive_prefix at git-compat-util.h:433:2
         let diff = Diff::new(
             Vec::from([
                 "CF: is_absolute_path at cache.h:1276:32",
