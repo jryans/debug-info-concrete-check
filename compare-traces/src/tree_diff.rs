@@ -3,6 +3,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use bimap::BiHashMap;
 use indexmap::IndexMap;
+use once_cell::sync::Lazy;
 use similar::{capture_diff_slices, DiffOp, DiffTag};
 use strsim::normalized_levenshtein;
 
@@ -399,6 +400,14 @@ pub struct TreeDiff<'content> {
     pub grouped_diff_ops: Vec<Vec<DiffOp>>,
 }
 
+fn is_known_library_function_replacement(before: &str, after: &str) -> bool {
+    static KNOWN_REPLACEMENTS: Lazy<HashMap<&str, &str>> =
+        Lazy::new(|| HashMap::from([("printf", "puts")]));
+    KNOWN_REPLACEMENTS
+        .get(before)
+        .map_or(false, |expected| after == *expected)
+}
+
 /// Override `Event` equality to allow for some source coordinate drift
 #[derive(Clone, Debug)]
 struct FuzzyEvent(Event);
@@ -422,11 +431,16 @@ impl FuzzyEvent {
             && b_loc.file.is_none()
         {
             // Most likely an external code event
+            let a_func = a_loc.function.as_ref().unwrap();
+            let b_func = b_loc.function.as_ref().unwrap();
+
             // Allow some function name edits to detect call replacement
-            return normalized_levenshtein(
-                a_loc.function.as_ref().unwrap(),
-                b_loc.function.as_ref().unwrap(),
-            ) >= 0.5;
+            if normalized_levenshtein(a_func, b_func) >= 0.5 {
+                return true;
+            }
+
+            // Check for known function name changes that exceed Levenshtein limit
+            return is_known_library_function_replacement(a_func, b_func);
         }
 
         if a_loc.function.is_some()

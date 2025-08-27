@@ -347,13 +347,12 @@ fn check_for_library_call_added(
 // <   RF: Jump to external code for ___vsnprintf_chk
 // >   RF: Jump to external code for _vsnprintf
 fn check_for_library_call_replaced(
-    diff: &Diff<'_>,
     grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
     for (diff_op, change_tuples_events) in grouped_events {
-        // Look for changed external call to and return from
+        // Look for changed external call events
         if diff_op.tag() != DiffTag::Replace {
             continue;
         }
@@ -363,56 +362,35 @@ fn check_for_library_call_replaced(
         let (after_change_tag, after_events) = &mut afters[0];
         assert!(*before_change_tag == ChangeTag::Delete);
         assert!(*after_change_tag == ChangeTag::Insert);
-        // Ensure events mention external call
-        if before_events.len() < 2 || after_events.len() < 2 {
-            continue;
-        }
-        if before_events
-            .iter()
-            .any(|e| !e.detail.to_lowercase().contains("external code"))
-            || after_events
-                .iter()
-                .any(|e| !e.detail.to_lowercase().contains("external code"))
-        {
-            continue;
-        }
-
-        // Look for unchanged call from just before changed events
-        // TODO: Retain parsed events for use here...?
-        let previous_before_event =
-            Event::parse(diff.before_lines[diff_op.old_range().start - 1]).unwrap();
-        let previous_after_event =
-            Event::parse(diff.after_lines[diff_op.new_range().start - 1]).unwrap();
-        // Ensure at least the event type and function name matches
-        // (coordinate drift is ignored for this pattern)
-        if previous_before_event.event_type != EventType::CallFrom
-            || previous_after_event.event_type != EventType::CallFrom
-        {
-            continue;
-        }
-        if previous_before_event.location.function != previous_after_event.location.function {
-            continue;
-        }
 
         // Extract related events
         let mut related_before_events = vec![];
         let mut related_after_events = vec![];
 
-        {
-            related_before_events.push(previous_before_event);
-            related_after_events.push(previous_after_event);
+        // Any number of adjacent events accepted
+        while !before_events.is_empty() && !after_events.is_empty() {
+            let before_event = &before_events[0];
+            let after_event = &after_events[0];
+            // Ensure before and after events mentions external call
+            if !before_event.detail.to_lowercase().contains("external code")
+                || !after_event.detail.to_lowercase().contains("external code")
+            {
+                break;
+            }
+            // Ensure the event type matches
+            if before_event.event_type != after_event.event_type {
+                break;
+            }
+            // Ensure the function name does _not_ match
+            if before_event.location.function == after_event.location.function {
+                break;
+            }
+            related_before_events.push(before_events.pop_front().unwrap());
+            related_after_events.push(after_events.pop_front().unwrap());
         }
 
-        {
-            let (befores, afters) = change_tuples_events.split_at_mut(1);
-            let (_, before_events) = &mut befores[0];
-            let (_, after_events) = &mut afters[0];
-            while !before_events.is_empty() {
-                related_before_events.push(before_events.pop_front().unwrap());
-            }
-            while !after_events.is_empty() {
-                related_after_events.push(after_events.pop_front().unwrap());
-            }
+        if related_before_events.is_empty() || related_after_events.is_empty() {
+            continue;
         }
 
         divergences.push(Divergence::new(
@@ -826,7 +804,7 @@ fn check_for_known_divergences(
             }
         }
         {
-            let mut divergences_found = check_for_library_call_replaced(diff, grouped_events);
+            let mut divergences_found = check_for_library_call_replaced(grouped_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
                 continue;
@@ -1321,7 +1299,7 @@ mod tests {
             divergence.divergence_type,
             DivergenceType::LibraryCallReplaced
         );
-        assert_eq!(divergence.before_events.len(), 3);
+        assert_eq!(divergence.before_events.len(), 2);
     }
 
     #[test]
