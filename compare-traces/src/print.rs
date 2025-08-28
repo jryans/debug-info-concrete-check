@@ -37,15 +37,6 @@ pub fn print_change(op: &DiffOp, change_tuples: &[(ChangeTag, &[&str])]) {
     }
 }
 
-// TODO: Perhaps handle this with generic types...?
-pub fn print_change_vec(op: &DiffOp, change_tuples: &[(ChangeTag, Vec<&str>)]) {
-    let change_tuples_slices: Vec<_> = change_tuples
-        .iter()
-        .map(|(tag, vec)| (tag.clone(), vec.as_slice()))
-        .collect();
-    print_change(op, change_tuples_slices.as_slice());
-}
-
 pub fn print_change_group(diff: &Diff<'_>, op_group: &Vec<DiffOp>) {
     for op in op_group {
         let change_tuples: Vec<_> = op

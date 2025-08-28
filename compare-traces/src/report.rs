@@ -13,7 +13,7 @@ use similar::{ChangeTag, DiffOp, DiffTag};
 
 use crate::diff::Diff;
 use crate::event::{Event, EventSource, EventType, Location};
-use crate::print::{print_change_group, print_change_vec};
+use crate::print::print_change_group;
 use crate::remarks::Remark;
 
 #[derive(Sequence, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
@@ -948,32 +948,6 @@ fn check_for_known_divergences(
     divergences
 }
 
-fn tweak_alignment(op: &DiffOp, change_tuples_strings: &mut [(ChangeTag, Vec<&str>)]) -> bool {
-    let mut changed: bool = false;
-
-    if op.tag() == DiffTag::Delete && change_tuples_strings.len() == 1 {
-        let change_strings = &change_tuples_strings[0].1;
-        let string_count = change_strings.len();
-        // Limit to regions of at most 5 lines to accommodate both:
-        // - Internal call (3 lines)
-        // - External call (5 lines)
-        if string_count > 1 && string_count <= 5 {
-            let last_string = *change_strings.last().unwrap();
-            // Repeated sequences where one part is deleted sometimes appear as
-            // 2-N lines of one part, 1 line of next part
-            if last_string.contains("CF:") {
-                let mut change_strings_reordered = vec![last_string];
-                let last_string_index = change_strings.len() - 1;
-                change_strings_reordered.extend_from_slice(&change_strings[..last_string_index]);
-                change_tuples_strings[0].1 = change_strings_reordered;
-                changed = true;
-            }
-        }
-    }
-
-    changed
-}
-
 fn print_events(events: &Vec<Event>) {
     let event_count = events.len();
     if event_count <= 30 {
@@ -991,18 +965,13 @@ fn print_events(events: &Vec<Event>) {
 
 pub struct DivergenceAnalysis {
     remarks_by_location: Option<HashMap<Location, Remark>>,
-    tweak_event_alignment: bool,
     divergence_stats_by_coordinates: BTreeMap<Divergence, u64>,
 }
 
 impl DivergenceAnalysis {
-    pub fn new(
-        remarks_by_location: Option<HashMap<Location, Remark>>,
-        tweak_event_alignment: bool,
-    ) -> DivergenceAnalysis {
+    pub fn new(remarks_by_location: Option<HashMap<Location, Remark>>) -> DivergenceAnalysis {
         DivergenceAnalysis {
             remarks_by_location,
-            tweak_event_alignment,
             divergence_stats_by_coordinates: BTreeMap::new(),
         }
     }
@@ -1024,18 +993,6 @@ impl DivergenceAnalysis {
                     .iter_slices(&diff.before_lines, &diff.after_lines)
                     .map(|(tag, slices)| (tag, Vec::from(slices)))
                     .collect();
-
-                // Fix up alignment where possible
-                // JRS: Maybe remove this by using the previous line from context...?
-                if self.tweak_event_alignment {
-                    if tweak_alignment(&op, &mut change_tuples_strings) {
-                        if log_enabled!(log::Level::Debug) {
-                            println!("Alignment tweaked, new ordering:");
-                            print_change_vec(&op, &change_tuples_strings);
-                            println!();
-                        }
-                    }
-                }
 
                 // Parse raw text into events
                 let mut parse_errors = vec![];

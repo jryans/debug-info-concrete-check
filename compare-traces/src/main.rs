@@ -66,10 +66,6 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = DiffStrategy::Tree)]
     diff_strategy: DiffStrategy,
 
-    /// Tweak event alignment to improve text diffing results
-    #[arg(long)]
-    tweak_event_alignment: bool,
-
     /// Whether to save traces to new files just after the inlining transform
     #[arg(long)]
     save_after_inlining_transform: bool,
@@ -128,10 +124,7 @@ fn main() -> Result<()> {
 
     let mut divergence_analysis: Option<DivergenceAnalysis> = None;
     if !cli.no_report {
-        divergence_analysis = Some(DivergenceAnalysis::new(
-            remarks_by_location,
-            cli.tweak_event_alignment,
-        ));
+        divergence_analysis = Some(DivergenceAnalysis::new(remarks_by_location));
     }
 
     let progress = ProgressBar::new(before_files.len().try_into().unwrap());
