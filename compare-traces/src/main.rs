@@ -8,6 +8,7 @@ use anyhow::{anyhow, Context, Ok, Result};
 use clap::{Parser, ValueEnum};
 use diff::Diff;
 use indicatif::{ProgressBar, ProgressStyle};
+use log::log_enabled;
 use similar::TextDiff;
 use tree_diff::diff_tree;
 use walkdir::WalkDir;
@@ -222,6 +223,10 @@ fn main() -> Result<()> {
         diff.after_file_path = Some(after_file.clone());
 
         if cli.diff {
+            if log_enabled!(log::Level::Debug) {
+                println!("{:#?}", &diff);
+                println!();
+            }
             print_diff(&diff);
         }
 
