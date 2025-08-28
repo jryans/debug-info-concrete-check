@@ -37,7 +37,7 @@ impl TreeNodeIndex {
     }
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct TreeNode {
     pub(crate) index: TreeNodeIndex,
     pub(crate) parent: Option<TreeNodeIndex>,
@@ -128,6 +128,7 @@ impl TreeNode {
 
 /// Tree built from / overlaid onto a separate array.
 /// Node data is accessed by indexing into that array.
+#[derive(Clone)]
 pub struct Tree {
     root: TreeNode,
     /// All non-root nodes.

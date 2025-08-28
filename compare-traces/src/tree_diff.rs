@@ -960,6 +960,10 @@ pub fn diff_tree<'content>(
     mut before: Trace<'content>,
     after: Trace<'content>,
 ) -> TreeDiff<'content> {
+    // Copy before tree, as we'll be modifying it as we go along,
+    // bringing it incrementally closer to the after tree
+    let before_unmodified = before.clone();
+
     // Morph trace events into fuzzy events
     let mut before_events: Vec<_> = before
         .events
@@ -971,8 +975,6 @@ pub fn diff_tree<'content>(
         .into_iter()
         .map(|event| FuzzyEvent(event))
         .collect();
-
-    // JRS: Do we want to save a copy of the before tree without edits...?
 
     // Collect tree event labels from function names along each node's tree path
     let before_labels = tree_event_labels(&before.tree, &before_events);
@@ -1154,7 +1156,7 @@ pub fn diff_tree<'content>(
     compact_diff_ops(&mut grouped_diff_ops);
 
     TreeDiff {
-        before_lines: before.lines,
+        before_lines: before_unmodified.lines,
         after_lines: after.lines,
         edit_ops,
         grouped_diff_ops,

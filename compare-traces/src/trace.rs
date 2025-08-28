@@ -13,6 +13,7 @@ fn indent_line(f: &mut std::fmt::Formatter<'_>, depth: usize) -> std::fmt::Resul
     Ok(())
 }
 
+#[derive(Clone)]
 pub struct Trace<'content> {
     pub(crate) lines: Vec<&'content str>,
     pub(crate) events: Vec<Event>,
