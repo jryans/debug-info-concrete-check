@@ -235,7 +235,7 @@ impl TreeEditOp {
             }],
             TreeEditOp::Remove { before_index } => {
                 let node = &before_tree[before_index];
-                let subtree_len = node.dfs_pre_order(before_tree).count();
+                let subtree_len = node.subtree_len(before_tree);
                 vec![DiffOp::Delete {
                     old_index: before_index.unwrap(),
                     old_len: subtree_len,

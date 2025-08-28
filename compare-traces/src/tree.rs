@@ -120,6 +120,10 @@ impl TreeNode {
             visited: HashSet::new(),
         }
     }
+
+    pub fn subtree_len<'tree>(&'tree self, tree: &'tree Tree) -> usize {
+        self.dfs_pre_order(tree).count()
+    }
 }
 
 /// Tree built from / overlaid onto a separate array.
