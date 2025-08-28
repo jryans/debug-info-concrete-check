@@ -81,6 +81,8 @@ impl Divergence {
             pass_responsible: None,
             before_file_path: None,
             after_file_path: None,
+            // JRS: Some tree diff ops use zeros, when really they mean `None`.
+            // For now, we put up with it, as these indices are only used for debugging.
             old_index: diff_op.old_range().start + 1,
             new_index: diff_op.new_range().start + 1,
         }

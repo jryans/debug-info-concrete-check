@@ -210,6 +210,8 @@ pub enum TreeEditOp {
 
 impl TreeEditOp {
     fn to_diff_ops(&self, before_tree: &Tree, after_tree: &Tree) -> Vec<DiffOp> {
+        // JRS: Ideally the zeros below would actually be `None`,
+        // since `0` points to an actual line, which is not what we mean here.
         match self {
             TreeEditOp::Add {
                 parent_index: _,
