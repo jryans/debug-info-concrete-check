@@ -791,6 +791,8 @@ fn check_for_known_divergences(
     grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
+    let mut uncategorised_grouped_events: HashMap<DiffOp, Vec<(ChangeTag, VecDeque<Event>)>> =
+        HashMap::new();
 
     // Check for divergences at least once and keep going each time more are found
     // JRS: Change patterns to produce all matching divergences up front...?
@@ -865,46 +867,80 @@ fn check_for_known_divergences(
                 continue;
             }
         }
-        break;
-    }
 
-    // If any events remain, record an unknown divergence
-    for (diff_op, change_tuples_events) in grouped_events {
-        if diff_op.tag() == DiffTag::Equal {
-            continue;
-        }
-        let events_present = change_tuples_events
-            .iter()
-            .any(|(_, events)| !events.is_empty());
-        if events_present {
+        // If any events remain, collect one from each tuple in preparation for
+        // assembling an uncategorised divergence after checking what remains
+        let mut moved_to_uncategorised = false;
+        for (diff_op, change_tuples_events) in &mut *grouped_events {
+            if diff_op.tag() == DiffTag::Equal {
+                continue;
+            }
+            let events_present = change_tuples_events
+                .iter()
+                .any(|(_, events)| !events.is_empty());
+            if !events_present {
+                continue;
+            }
             // Look for certain terms that suggest non-determinism
             static ND_RE: Lazy<Regex> =
                 Lazy::new(|| Regex::new(r"(sig|command|hash|alloc|env)").unwrap());
             let nondeterminism_found = change_tuples_events
                 .iter()
                 .any(|(_, events)| events.iter().any(|e| ND_RE.is_match(&e.detail)));
-            if !nondeterminism_found {
-                let mut remaining_before_events = vec![];
-                let mut remaining_after_events = vec![];
-                for (change_tag, events) in change_tuples_events {
-                    if *change_tag == ChangeTag::Equal {
-                        continue;
-                    }
-                    let mut collected_events = events.drain(..).collect::<Vec<_>>();
-                    if *change_tag == ChangeTag::Delete {
-                        remaining_before_events.append(&mut collected_events);
-                    } else {
-                        remaining_after_events.append(&mut collected_events);
-                    }
+            if nondeterminism_found {
+                // Return what we have and ignore the rest
+                return divergences;
+            }
+            // Retrieve or create the uncategorised change tuples with events for this diff op
+            let uncategorised_ctes =
+                uncategorised_grouped_events
+                    .entry(*diff_op)
+                    .or_insert_with(|| {
+                        let mut ctes: Vec<(ChangeTag, VecDeque<Event>)> = Vec::new();
+                        for (change_tag, _) in &*change_tuples_events {
+                            ctes.push((*change_tag, VecDeque::new()));
+                        }
+                        ctes
+                    });
+            // Move one event from each tuple, then retry matching
+            for i in 0..change_tuples_events.len() {
+                let (change_tag, events) = &mut change_tuples_events[i];
+                if *change_tag == ChangeTag::Equal {
+                    continue;
                 }
-                divergences.push(Divergence::new(
-                    DivergenceType::Uncategorised,
-                    remaining_before_events,
-                    remaining_after_events,
-                    diff_op,
-                ));
+                let (_, uncategorised_events) = &mut uncategorised_ctes[i];
+                uncategorised_events.push_back(events.pop_front().unwrap());
+                moved_to_uncategorised = true;
             }
         }
+        if moved_to_uncategorised {
+            continue;
+        }
+
+        break;
+    }
+
+    // Assemble uncategorised divergences from whatever may remain
+    for (diff_op, change_tuples_events) in uncategorised_grouped_events {
+        let mut remaining_before_events = vec![];
+        let mut remaining_after_events = vec![];
+        for (change_tag, mut events) in change_tuples_events {
+            if change_tag == ChangeTag::Equal {
+                continue;
+            }
+            let mut collected_events = events.drain(..).collect::<Vec<_>>();
+            if change_tag == ChangeTag::Delete {
+                remaining_before_events.append(&mut collected_events);
+            } else {
+                remaining_after_events.append(&mut collected_events);
+            }
+        }
+        divergences.push(Divergence::new(
+            DivergenceType::Uncategorised,
+            remaining_before_events,
+            remaining_after_events,
+            &diff_op,
+        ));
     }
 
     divergences
@@ -1443,5 +1479,45 @@ mod tests {
             DivergenceType::ProgramCallRemoved
         );
         assert_eq!(divergence.before_events.len(), 9);
+    }
+
+    #[test]
+    fn program_call_removed_after_uncategorised() {
+        let diff = Diff::new(
+            Vec::from([
+                "  RF: uncategorised at in-the-way.c:0:0",
+                "CF: is_absolute_path at cache.h:1276:32",
+                "  CT: git_has_dos_drive_prefix at git-compat-util.h:432:0",
+                "  RF: git_has_dos_drive_prefix at git-compat-util.h:433:2",
+            ]),
+            Vec::from([]),
+            Vec::from([Vec::from([DiffOp::Delete {
+                old_index: 0,
+                old_len: 4,
+                new_index: 0,
+            }])]),
+        );
+        let change_tuples_events = Vec::from([(
+            ChangeTag::Delete,
+            diff.before_lines
+                .iter()
+                .map(|str| Event::parse(str).unwrap())
+                .collect::<VecDeque<_>>(),
+        )]);
+        let mut grouped_events = [(diff.grouped_diff_ops[0][0], change_tuples_events)];
+        let divergences = check_for_known_divergences(&diff, &mut grouped_events);
+        assert_eq!(divergences.len(), 2);
+        let program_call_removed_divergence = &divergences[0];
+        assert_eq!(
+            program_call_removed_divergence.divergence_type,
+            DivergenceType::ProgramCallRemoved
+        );
+        assert_eq!(program_call_removed_divergence.before_events.len(), 3);
+        let uncategorised_divergence = &divergences[1];
+        assert_eq!(
+            uncategorised_divergence.divergence_type,
+            DivergenceType::Uncategorised
+        );
+        assert_eq!(uncategorised_divergence.before_events.len(), 1);
     }
 }
