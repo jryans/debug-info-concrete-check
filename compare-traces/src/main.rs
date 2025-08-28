@@ -57,9 +57,9 @@ struct Cli {
     #[arg(long)]
     diff: bool,
 
-    /// Analyse and report trace divergences
-    #[arg(long, default_value_t = true)]
-    report: bool,
+    /// Disable analysis and reporting of trace divergences
+    #[arg(long)]
+    no_report: bool,
 
     /// Strategy to use when comparing traces to reveal divergences
     #[arg(long, value_enum, default_value_t = DiffStrategy::Tree)]
@@ -126,7 +126,7 @@ fn main() -> Result<()> {
     }
 
     let mut divergence_analysis: Option<DivergenceAnalysis> = None;
-    if cli.report {
+    if !cli.no_report {
         divergence_analysis = Some(DivergenceAnalysis::new(
             remarks_by_location,
             cli.tweak_event_alignment,
