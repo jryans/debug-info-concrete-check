@@ -161,7 +161,7 @@ ICF: do_git_config_sequence at config.c:2126:24
           ICT: strbuf_avail at strbuf.h:139:0
           IRF: strbuf_avail at strbuf.h:0:0"
             .trim();
-        let trace = Trace::parse(content);
+        let trace = Trace::parse_str(content);
         let inlined_call_edges = gather_inlined_call_edges(&trace);
         assert_eq!(inlined_call_edges.len(), 3);
     }
@@ -208,7 +208,7 @@ ICF: strbuf_vaddf at strbuf.c:407:2
   IRF: strbuf_setlen at strbuf.h:0:0
 RF: strbuf_vaddf at strbuf.c:408:1"
             .trim();
-        let mut trace = Trace::parse(content);
+        let mut trace = Trace::parse_str(content);
         let inlined_call_edges = gather_inlined_call_edges(&trace);
         cluster_inlined_call_children(&mut trace, &inlined_call_edges);
         let expected = "
@@ -281,7 +281,7 @@ ICF: strbuf_vaddf at strbuf.c:395:3
   ICT: strbuf_grow at strbuf.c:91:0
   IRF: strbuf_grow at strbuf.c:0:0"
             .trim();
-        let mut trace = Trace::parse(content);
+        let mut trace = Trace::parse_str(content);
         let inlined_call_edges = gather_inlined_call_edges(&trace);
         cluster_inlined_call_children(&mut trace, &inlined_call_edges);
         let expected = "

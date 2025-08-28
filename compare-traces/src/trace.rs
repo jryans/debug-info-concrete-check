@@ -13,7 +13,7 @@ fn indent_line(f: &mut std::fmt::Formatter<'_>, depth: usize) -> std::fmt::Resul
     Ok(())
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Trace<'content> {
     pub(crate) lines: Vec<&'content str>,
     pub(crate) events: Vec<Event>,
@@ -21,19 +21,25 @@ pub struct Trace<'content> {
 }
 
 impl<'content> Trace<'content> {
-    pub fn parse(content: &str) -> Trace {
+    pub fn parse_str(content: &str) -> Trace {
         let lines: Vec<_> = content.lines().collect();
+        Self::parse_lines(lines)
+    }
+
+    pub fn parse_lines(lines: Vec<&str>) -> Trace {
         let mut events: Vec<_> = lines
             .iter()
             .map(|line| Event::parse(line).unwrap())
             .collect();
 
         // Attach partner events
-        for i in 0..(events.len() - 1) {
-            let (left, right) = events.split_at_mut(i + 1);
-            let a = left.last_mut().unwrap();
-            let b = right.first().unwrap();
-            a.attach_partner(b);
+        if !events.is_empty() {
+            for i in 0..(events.len() - 1) {
+                let (left, right) = events.split_at_mut(i + 1);
+                let a = left.last_mut().unwrap();
+                let b = right.first().unwrap();
+                a.attach_partner(b);
+            }
         }
 
         // Convert lines into trees
@@ -147,6 +153,6 @@ ICF: strbuf_vaddf at strbuf.c:395:3
       RF: Jump to external code for realloc
     RF: xrealloc at wrapper.c:140:1"
             .trim();
-        assert_eq!(format!("{}", Trace::parse(content)).trim(), content);
+        assert_eq!(format!("{}", Trace::parse_str(content)).trim(), content);
     }
 }

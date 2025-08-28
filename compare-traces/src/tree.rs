@@ -128,7 +128,7 @@ impl TreeNode {
 
 /// Tree built from / overlaid onto a separate array.
 /// Node data is accessed by indexing into that array.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Tree {
     root: TreeNode,
     /// All non-root nodes.
@@ -163,10 +163,13 @@ impl Tree {
     /// Build a tree from indented items
     // JRS: This should probably move to the `Trace` module
     pub fn from_indented_items(items: &[&str]) -> Tree {
-        assert!(items.len() > 0);
+        let mut tree = Tree::new();
+
+        if items.is_empty() {
+            return tree;
+        }
         assert!(line_depth(items[0]) == 1);
 
-        let mut tree = Tree::new();
         // Temporary stack tracking indentation as we build the tree
         let mut stack: Vec<TreeNodeIndex> = Vec::new();
         stack.push(Tree::root_index());

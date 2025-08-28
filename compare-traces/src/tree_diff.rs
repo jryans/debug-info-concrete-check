@@ -396,8 +396,8 @@ fn compact_diff_ops(grouped_diff_ops: &mut Vec<Vec<DiffOp>>) {
 
 #[derive(Debug)]
 pub struct TreeDiff<'content> {
-    pub before_lines: Vec<&'content str>,
-    pub after_lines: Vec<&'content str>,
+    pub before_trace: Trace<'content>,
+    pub after_trace: Trace<'content>,
     pub edit_ops: Vec<TreeEditOp>,
     pub grouped_diff_ops: Vec<Vec<DiffOp>>,
 }
@@ -972,7 +972,8 @@ pub fn diff_tree<'content>(
         .collect();
     let after_events: Vec<_> = after
         .events
-        .into_iter()
+        .iter()
+        .cloned()
         .map(|event| FuzzyEvent(event))
         .collect();
 
@@ -1156,8 +1157,8 @@ pub fn diff_tree<'content>(
     compact_diff_ops(&mut grouped_diff_ops);
 
     TreeDiff {
-        before_lines: before_unmodified.lines,
-        after_lines: after.lines,
+        before_trace: before_unmodified,
+        after_trace: after,
         edit_ops,
         grouped_diff_ops,
     }
@@ -1495,7 +1496,10 @@ CF: D at file.tex
     CF: Se at file.tex
     CF: Sg at file.tex"
             .trim();
-        let diff = diff_tree(Trace::parse(before_content), Trace::parse(after_content));
+        let diff = diff_tree(
+            Trace::parse_str(before_content),
+            Trace::parse_str(after_content),
+        );
         assert_eq!(
             diff.edit_ops,
             vec![
@@ -1551,7 +1555,10 @@ CF: all_attrs_init at attr.c:155:3
   CT: hashmap_iter_next at hashmap.c:295:0
   RF: hashmap_iter_next at hashmap.c:308:1"
             .trim();
-        let diff = diff_tree(Trace::parse(before_content), Trace::parse(after_content));
+        let diff = diff_tree(
+            Trace::parse_str(before_content),
+            Trace::parse_str(after_content),
+        );
         assert_eq!(
             diff.edit_ops,
             vec![TreeEditOp::Remove {
@@ -1598,7 +1605,10 @@ CF: system_path at exec-cmd.c:268:27
   CT: system_prefix at exec-cmd.c:247:0
   RF: system_prefix at exec-cmd.c:248:2"
             .trim();
-        let diff = diff_tree(Trace::parse(before_content), Trace::parse(after_content));
+        let diff = diff_tree(
+            Trace::parse_str(before_content),
+            Trace::parse_str(after_content),
+        );
         assert_eq!(
             diff.edit_ops,
             vec![TreeEditOp::Remove {
@@ -1627,7 +1637,10 @@ CF: strbuf_vaddf at strbuf.c:397:8
   CT: Jump to external code for _vsnprintf
   RF: Jump to external code for _vsnprintf"
             .trim();
-        let diff = diff_tree(Trace::parse(before_content), Trace::parse(after_content));
+        let diff = diff_tree(
+            Trace::parse_str(before_content),
+            Trace::parse_str(after_content),
+        );
         assert_eq!(
             diff.edit_ops,
             vec![
@@ -1672,7 +1685,10 @@ CF: main at ffmpeg.c:4521:5
   CT: init_dynload at cmdutils.c:84:1
   RF: init_dynload at cmdutils.c:84:1"
             .trim();
-        let diff = diff_tree(Trace::parse(before_content), Trace::parse(after_content));
+        let diff = diff_tree(
+            Trace::parse_str(before_content),
+            Trace::parse_str(after_content),
+        );
         assert_eq!(
             diff.edit_ops,
             vec![TreeEditOp::Replace {
@@ -1716,7 +1732,10 @@ ICF: error_builtin at usage.c:81:11
     RF: Jump to external code for dcgettext
   IRF: _ at gettext.h:0:0"
             .trim();
-        let diff = diff_tree(Trace::parse(before_content), Trace::parse(after_content));
+        let diff = diff_tree(
+            Trace::parse_str(before_content),
+            Trace::parse_str(after_content),
+        );
         assert_eq!(
             diff.edit_ops,
             vec![

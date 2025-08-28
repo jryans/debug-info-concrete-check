@@ -40,7 +40,7 @@ pub fn print_change(op: &DiffOp, change_tuples: &[(ChangeTag, &[&str])]) {
 pub fn print_change_group(diff: &Diff<'_>, op_group: &Vec<DiffOp>) {
     for op in op_group {
         let change_tuples: Vec<_> = op
-            .iter_slices(&diff.before_lines, &diff.after_lines)
+            .iter_slices(&diff.before_trace.lines, &diff.after_trace.lines)
             .collect();
         print_change(op, &change_tuples);
     }

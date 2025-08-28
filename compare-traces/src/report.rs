@@ -989,31 +989,10 @@ impl DivergenceAnalysis {
 
             for op in op_group {
                 // TODO: Skip unnecessary collects / copies
-                let mut change_tuples_strings: Vec<_> = op
-                    .iter_slices(&diff.before_lines, &diff.after_lines)
-                    .map(|(tag, slices)| (tag, Vec::from(slices)))
+                let change_tuples_events: Vec<_> = op
+                    .iter_slices(&diff.before_trace.events, &diff.after_trace.events)
+                    .map(|(tag, events)| (tag, events.iter().cloned().collect::<VecDeque<_>>()))
                     .collect();
-
-                // Parse raw text into events
-                let mut parse_errors = vec![];
-                let change_tuples_events: Vec<_> = change_tuples_strings
-                    .iter()
-                    .map(|(tag, strings)| {
-                        (
-                            tag.clone(),
-                            strings
-                                .iter()
-                                .map(|str| Event::parse(str))
-                                .filter_map(|r| r.map_err(|e| parse_errors.push(e)).ok())
-                                .collect::<VecDeque<_>>(),
-                        )
-                    })
-                    .collect();
-                for error in parse_errors {
-                    println!("{}", error);
-                    println!();
-                }
-
                 grouped_events.push((*op, change_tuples_events));
             }
 
@@ -1154,6 +1133,8 @@ impl DivergenceAnalysis {
 
 #[cfg(test)]
 mod tests {
+    use crate::trace::Trace;
+
     use super::*;
 
     #[test]
@@ -1166,8 +1147,8 @@ mod tests {
     #[test]
     fn coordinates_removed() {
         let diff = Diff::new(
-            Vec::from(["CF: getnanotime at trace.c:397:18"]),
-            Vec::from(["CF: getnanotime at trace.c:0:0"]),
+            Trace::parse_lines(Vec::from(["CF: getnanotime at trace.c:397:18"])),
+            Trace::parse_lines(Vec::from(["CF: getnanotime at trace.c:0:0"])),
             Vec::from([Vec::from([DiffOp::Replace {
                 old_index: 0,
                 old_len: 1,
@@ -1178,14 +1159,16 @@ mod tests {
         let change_tuples_events = Vec::from([
             (
                 ChangeTag::Delete,
-                diff.before_lines
+                diff.before_trace
+                    .lines
                     .iter()
                     .map(|str| Event::parse(str).unwrap())
                     .collect::<VecDeque<_>>(),
             ),
             (
                 ChangeTag::Insert,
-                diff.after_lines
+                diff.after_trace
+                    .lines
                     .iter()
                     .map(|str| Event::parse(str).unwrap())
                     .collect::<VecDeque<_>>(),
@@ -1210,8 +1193,12 @@ mod tests {
     #[test]
     fn coordinates_changed() {
         let diff = Diff::new(
-            Vec::from(["CT: xstrdup_or_null at git-compat-util.h:1168:0"]),
-            Vec::from(["CT: xstrdup_or_null at git-compat-util.h:1169:9"]),
+            Trace::parse_lines(Vec::from([
+                "CT: xstrdup_or_null at git-compat-util.h:1168:0",
+            ])),
+            Trace::parse_lines(Vec::from([
+                "CT: xstrdup_or_null at git-compat-util.h:1169:9",
+            ])),
             Vec::from([Vec::from([DiffOp::Replace {
                 old_index: 0,
                 old_len: 1,
@@ -1222,14 +1209,16 @@ mod tests {
         let change_tuples_events = Vec::from([
             (
                 ChangeTag::Delete,
-                diff.before_lines
+                diff.before_trace
+                    .lines
                     .iter()
                     .map(|str| Event::parse(str).unwrap())
                     .collect::<VecDeque<_>>(),
             ),
             (
                 ChangeTag::Insert,
-                diff.after_lines
+                diff.after_trace
+                    .lines
                     .iter()
                     .map(|str| Event::parse(str).unwrap())
                     .collect::<VecDeque<_>>(),
@@ -1254,16 +1243,16 @@ mod tests {
     #[test]
     fn library_call_replaced() {
         let diff = Diff::new(
-            Vec::from([
+            Trace::parse_lines(Vec::from([
                 "CF: strbuf_vaddf at strbuf.c:397:8",
                 "  CT: Jump to external code for ___vsnprintf_chk",
                 "  RF: Jump to external code for ___vsnprintf_chk",
-            ]),
-            Vec::from([
+            ])),
+            Trace::parse_lines(Vec::from([
                 "CF: strbuf_vaddf at strbuf.c:397:8",
                 "  CT: Jump to external code for _vsnprintf",
                 "  RF: Jump to external code for _vsnprintf",
-            ]),
+            ])),
             Vec::from([Vec::from([DiffOp::Replace {
                 old_index: 1,
                 old_len: 2,
@@ -1274,14 +1263,14 @@ mod tests {
         let change_tuples_events = Vec::from([
             (
                 ChangeTag::Delete,
-                diff.before_lines[1..]
+                diff.before_trace.lines[1..]
                     .iter()
                     .map(|str| Event::parse(str).unwrap())
                     .collect::<VecDeque<_>>(),
             ),
             (
                 ChangeTag::Insert,
-                diff.after_lines[1..]
+                diff.after_trace.lines[1..]
                     .iter()
                     .map(|str| Event::parse(str).unwrap())
                     .collect::<VecDeque<_>>(),
@@ -1301,12 +1290,12 @@ mod tests {
     #[test]
     fn library_call_removed_single() {
         let diff = Diff::new(
-            Vec::from([
+            Trace::parse_lines(Vec::from([
                 "CF: strbuf_init at strbuf.c:57:2",
                 "  CT: Jump to external code",
                 "  RF: Jump to external code",
-            ]),
-            Vec::from([]),
+            ])),
+            Trace::parse_lines(Vec::from([])),
             Vec::from([Vec::from([DiffOp::Delete {
                 old_index: 0,
                 old_len: 3,
@@ -1315,7 +1304,8 @@ mod tests {
         );
         let change_tuples_events = Vec::from([(
             ChangeTag::Delete,
-            diff.before_lines
+            diff.before_trace
+                .lines
                 .iter()
                 .map(|str| Event::parse(str).unwrap())
                 .collect::<VecDeque<_>>(),
@@ -1334,15 +1324,15 @@ mod tests {
     #[test]
     fn library_call_removed_multiple() {
         let diff = Diff::new(
-            Vec::from([
+            Trace::parse_lines(Vec::from([
                 "CF: init_repository_format at setup.c:710:33",
                 "  CT: Jump to external code",
                 "  RF: Jump to external code",
                 "CF: init_repository_format at setup.c:712:2",
                 "  CT: Jump to external code",
                 "  RF: Jump to external code",
-            ]),
-            Vec::from([]),
+            ])),
+            Trace::parse_lines(Vec::from([])),
             Vec::from([Vec::from([DiffOp::Delete {
                 old_index: 0,
                 old_len: 6,
@@ -1351,7 +1341,8 @@ mod tests {
         );
         let change_tuples_events = Vec::from([(
             ChangeTag::Delete,
-            diff.before_lines
+            diff.before_trace
+                .lines
                 .iter()
                 .map(|str| Event::parse(str).unwrap())
                 .collect::<VecDeque<_>>(),
@@ -1371,12 +1362,12 @@ mod tests {
     #[test]
     fn program_call_removed() {
         let diff = Diff::new(
-            Vec::from([
+            Trace::parse_lines(Vec::from([
                 "CF: is_absolute_path at cache.h:1276:32",
                 "  CT: git_has_dos_drive_prefix at git-compat-util.h:432:0",
                 "  RF: git_has_dos_drive_prefix at git-compat-util.h:433:2",
-            ]),
-            Vec::from([]),
+            ])),
+            Trace::parse_lines(Vec::from([])),
             Vec::from([Vec::from([DiffOp::Delete {
                 old_index: 0,
                 old_len: 3,
@@ -1385,7 +1376,8 @@ mod tests {
         );
         let change_tuples_events = Vec::from([(
             ChangeTag::Delete,
-            diff.before_lines
+            diff.before_trace
+                .lines
                 .iter()
                 .map(|str| Event::parse(str).unwrap())
                 .collect::<VecDeque<_>>(),
@@ -1404,7 +1396,7 @@ mod tests {
     #[test]
     fn program_call_subtree_removed() {
         let diff = Diff::new(
-            Vec::from([
+            Trace::parse_lines(Vec::from([
                 "CF: clear_repository_format at setup.c:730:2",
                 "  CT: init_repository_format at setup.c:709:0",
                 "  CF: init_repository_format at setup.c:710:33",
@@ -1414,8 +1406,8 @@ mod tests {
                 "    CT: Jump to external code for memcpy",
                 "    RF: Jump to external code for memcpy",
                 "  RF: init_repository_format at setup.c:713:1",
-            ]),
-            Vec::from([]),
+            ])),
+            Trace::parse_lines(Vec::from([])),
             Vec::from([Vec::from([DiffOp::Delete {
                 old_index: 0,
                 old_len: 9,
@@ -1424,7 +1416,8 @@ mod tests {
         );
         let change_tuples_events = Vec::from([(
             ChangeTag::Delete,
-            diff.before_lines
+            diff.before_trace
+                .lines
                 .iter()
                 .map(|str| Event::parse(str).unwrap())
                 .collect::<VecDeque<_>>(),
@@ -1443,13 +1436,13 @@ mod tests {
     #[test]
     fn program_call_removed_after_uncategorised() {
         let diff = Diff::new(
-            Vec::from([
-                "  RF: uncategorised at in-the-way.c:0:0",
+            Trace::parse_lines(Vec::from([
+                "CT: uncategorised at in-the-way.c:0:0",
                 "CF: is_absolute_path at cache.h:1276:32",
                 "  CT: git_has_dos_drive_prefix at git-compat-util.h:432:0",
                 "  RF: git_has_dos_drive_prefix at git-compat-util.h:433:2",
-            ]),
-            Vec::from([]),
+            ])),
+            Trace::parse_lines(Vec::from([])),
             Vec::from([Vec::from([DiffOp::Delete {
                 old_index: 0,
                 old_len: 4,
@@ -1458,7 +1451,8 @@ mod tests {
         );
         let change_tuples_events = Vec::from([(
             ChangeTag::Delete,
-            diff.before_lines
+            diff.before_trace
+                .lines
                 .iter()
                 .map(|str| Event::parse(str).unwrap())
                 .collect::<VecDeque<_>>(),
