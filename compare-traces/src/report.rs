@@ -133,32 +133,32 @@ impl Ord for Divergence {
 // < CF: getnanotime at trace.c:397:18
 // > CF: getnanotime at trace.c:0:0
 fn check_for_coordinates_removed(
-    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
+    grouped_indexed_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<IndexedEvent>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
-    for (diff_op, change_tuples_events) in grouped_events {
+    for (diff_op, change_tuples_indexed_events) in grouped_indexed_events {
         // Diff op for this region should be replace
         if diff_op.tag() != DiffTag::Replace {
             continue;
         }
 
         // Should have two tuples with deleted and inserted lines
-        assert!(change_tuples_events.len() == 2);
-        let (befores, afters) = change_tuples_events.split_at_mut(1);
-        let (before_change_tag, before_events) = &mut befores[0];
-        let (after_change_tag, after_events) = &mut afters[0];
+        assert!(change_tuples_indexed_events.len() == 2);
+        let (befores, afters) = change_tuples_indexed_events.split_at_mut(1);
+        let (before_change_tag, before_indexed_events) = &mut befores[0];
+        let (after_change_tag, after_indexed_events) = &mut afters[0];
         assert!(*before_change_tag == ChangeTag::Delete);
         assert!(*after_change_tag == ChangeTag::Insert);
 
         // Must have at least one event on both sides
-        if before_events.len() < 1 || after_events.len() < 1 {
+        if before_indexed_events.len() < 1 || after_indexed_events.len() < 1 {
             continue;
         }
 
         // Function and file must match
-        let before_event = &before_events[0];
-        let after_event = &after_events[0];
+        let before_event = &before_indexed_events[0].event;
+        let after_event = &after_indexed_events[0].event;
         if before_event.location.function != after_event.location.function {
             continue;
         }
@@ -177,8 +177,8 @@ fn check_for_coordinates_removed(
         let mut related_before_events = vec![];
         let mut related_after_events = vec![];
 
-        related_before_events.push(before_events.pop_front().unwrap());
-        related_after_events.push(after_events.pop_front().unwrap());
+        related_before_events.push(before_indexed_events.pop_front().unwrap().event);
+        related_after_events.push(after_indexed_events.pop_front().unwrap().event);
 
         divergences.push(Divergence::new(
             DivergenceType::CoordinatesRemoved,
@@ -195,32 +195,32 @@ fn check_for_coordinates_removed(
 // < CT: xstrdup_or_null at git-compat-util.h:1168:0
 // > CT: xstrdup_or_null at git-compat-util.h:1169:9
 fn check_for_coordinates_changed(
-    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
+    grouped_indexed_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<IndexedEvent>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
-    for (diff_op, change_tuples_events) in grouped_events {
+    for (diff_op, change_tuples_indexed_events) in grouped_indexed_events {
         // Diff op for this region should be replace
         if diff_op.tag() != DiffTag::Replace {
             continue;
         }
 
         // Should have two tuples with deleted and inserted lines
-        assert!(change_tuples_events.len() == 2);
-        let (befores, afters) = change_tuples_events.split_at_mut(1);
-        let (before_change_tag, before_events) = &mut befores[0];
-        let (after_change_tag, after_events) = &mut afters[0];
+        assert!(change_tuples_indexed_events.len() == 2);
+        let (befores, afters) = change_tuples_indexed_events.split_at_mut(1);
+        let (before_change_tag, before_indexed_events) = &mut befores[0];
+        let (after_change_tag, after_indexed_events) = &mut afters[0];
         assert!(*before_change_tag == ChangeTag::Delete);
         assert!(*after_change_tag == ChangeTag::Insert);
 
         // Must have at least one event on both sides
-        if before_events.len() < 1 || after_events.len() < 1 {
+        if before_indexed_events.len() < 1 || after_indexed_events.len() < 1 {
             continue;
         }
 
         // Function and file must match
-        let before_event = &before_events[0];
-        let after_event = &after_events[0];
+        let before_event = &before_indexed_events[0].event;
+        let after_event = &after_indexed_events[0].event;
         if before_event.location.function != after_event.location.function {
             continue;
         }
@@ -262,8 +262,8 @@ fn check_for_coordinates_changed(
         let mut related_before_events = vec![];
         let mut related_after_events = vec![];
 
-        related_before_events.push(before_events.pop_front().unwrap());
-        related_after_events.push(after_events.pop_front().unwrap());
+        related_before_events.push(before_indexed_events.pop_front().unwrap().event);
+        related_after_events.push(after_indexed_events.pop_front().unwrap().event);
 
         divergences.push(Divergence::new(
             divergence_type,
@@ -281,44 +281,47 @@ fn check_for_coordinates_changed(
 // +   CT: Jump to external code
 // +   RF: Jump to external code
 fn check_for_library_call_added(
-    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
+    grouped_indexed_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<IndexedEvent>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
-    for (diff_op, change_tuples_events) in grouped_events {
+    for (diff_op, change_tuples_indexed_events) in grouped_indexed_events {
         // Diff op for this region should be insert
         if diff_op.tag() != DiffTag::Insert {
             continue;
         }
 
         // Should have a single tuple with inserted lines
-        assert!(change_tuples_events.len() == 1);
-        let (change_tag, events) = &mut change_tuples_events[0];
+        assert!(change_tuples_indexed_events.len() == 1);
+        let (change_tag, indexed_events) = &mut change_tuples_indexed_events[0];
         assert!(*change_tag == ChangeTag::Insert);
 
         // Must have at least 3 events
-        if events.len() < 3 {
+        if indexed_events.len() < 3 {
             continue;
         }
 
         // First event should be call from traced binary
-        if events[0].event_type != EventType::CallFrom {
+        let first_event = &indexed_events[0].event;
+        if first_event.event_type != EventType::CallFrom {
             continue;
         }
 
         // Second event should be call to external library
-        if events[1].event_type != EventType::CallTo {
+        let second_event = &indexed_events[1].event;
+        if second_event.event_type != EventType::CallTo {
             continue;
         }
-        if !events[1].detail.to_lowercase().contains("external code") {
+        if !second_event.detail.to_lowercase().contains("external code") {
             continue;
         }
 
         // Third event should be return from external library
-        if events[2].event_type != EventType::ReturnFrom {
+        let third_event = &indexed_events[2].event;
+        if third_event.event_type != EventType::ReturnFrom {
             continue;
         }
-        if !events[2].detail.to_lowercase().contains("external code") {
+        if !third_event.detail.to_lowercase().contains("external code") {
             continue;
         }
 
@@ -327,9 +330,9 @@ fn check_for_library_call_added(
         let mut related_after_events = vec![];
 
         // First 3 are known to match
-        related_after_events.push(events.pop_front().unwrap());
-        related_after_events.push(events.pop_front().unwrap());
-        related_after_events.push(events.pop_front().unwrap());
+        related_after_events.push(indexed_events.pop_front().unwrap().event);
+        related_after_events.push(indexed_events.pop_front().unwrap().event);
+        related_after_events.push(indexed_events.pop_front().unwrap().event);
 
         divergences.push(Divergence::new(
             DivergenceType::LibraryCallAdded,
@@ -349,19 +352,19 @@ fn check_for_library_call_added(
 // <   RF: Jump to external code for ___vsnprintf_chk
 // >   RF: Jump to external code for _vsnprintf
 fn check_for_library_call_replaced(
-    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
+    grouped_indexed_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<IndexedEvent>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
-    for (diff_op, change_tuples_events) in grouped_events {
+    for (diff_op, change_tuples_indexed_events) in grouped_indexed_events {
         // Look for changed external call events
         if diff_op.tag() != DiffTag::Replace {
             continue;
         }
-        assert!(change_tuples_events.len() == 2);
-        let (befores, afters) = change_tuples_events.split_at_mut(1);
-        let (before_change_tag, before_events) = &mut befores[0];
-        let (after_change_tag, after_events) = &mut afters[0];
+        assert!(change_tuples_indexed_events.len() == 2);
+        let (befores, afters) = change_tuples_indexed_events.split_at_mut(1);
+        let (before_change_tag, before_indexed_events) = &mut befores[0];
+        let (after_change_tag, after_indexed_events) = &mut afters[0];
         assert!(*before_change_tag == ChangeTag::Delete);
         assert!(*after_change_tag == ChangeTag::Insert);
 
@@ -370,9 +373,9 @@ fn check_for_library_call_replaced(
         let mut related_after_events = vec![];
 
         // Any number of adjacent events accepted
-        while !before_events.is_empty() && !after_events.is_empty() {
-            let before_event = &before_events[0];
-            let after_event = &after_events[0];
+        while !before_indexed_events.is_empty() && !after_indexed_events.is_empty() {
+            let before_event = &before_indexed_events[0].event;
+            let after_event = &after_indexed_events[0].event;
             // Ensure before and after events mentions external call
             if !before_event.detail.to_lowercase().contains("external code")
                 || !after_event.detail.to_lowercase().contains("external code")
@@ -387,8 +390,8 @@ fn check_for_library_call_replaced(
             if before_event.location.function == after_event.location.function {
                 break;
             }
-            related_before_events.push(before_events.pop_front().unwrap());
-            related_after_events.push(after_events.pop_front().unwrap());
+            related_before_events.push(before_indexed_events.pop_front().unwrap().event);
+            related_after_events.push(after_indexed_events.pop_front().unwrap().event);
         }
 
         if related_before_events.is_empty() || related_after_events.is_empty() {
@@ -412,19 +415,19 @@ fn check_for_library_call_replaced(
 // < CT: Jump to external code for bsearch
 // > ICT: bsearch at stdlib-bsearch.h:20:0
 fn check_for_library_call_inlined(
-    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
+    grouped_indexed_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<IndexedEvent>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
-    for (diff_op, change_tuples_events) in grouped_events {
+    for (diff_op, change_tuples_indexed_events) in grouped_indexed_events {
         // Look for inlined external call events
         if diff_op.tag() != DiffTag::Replace {
             continue;
         }
-        assert!(change_tuples_events.len() == 2);
-        let (befores, afters) = change_tuples_events.split_at_mut(1);
-        let (before_change_tag, before_events) = &mut befores[0];
-        let (after_change_tag, after_events) = &mut afters[0];
+        assert!(change_tuples_indexed_events.len() == 2);
+        let (befores, afters) = change_tuples_indexed_events.split_at_mut(1);
+        let (before_change_tag, before_indexed_events) = &mut befores[0];
+        let (after_change_tag, after_indexed_events) = &mut afters[0];
         assert!(*before_change_tag == ChangeTag::Delete);
         assert!(*after_change_tag == ChangeTag::Insert);
 
@@ -433,9 +436,9 @@ fn check_for_library_call_inlined(
         let mut related_after_events = vec![];
 
         // Any number of adjacent events accepted
-        while !before_events.is_empty() && !after_events.is_empty() {
-            let before_event = &before_events[0];
-            let after_event = &after_events[0];
+        while !before_indexed_events.is_empty() && !after_indexed_events.is_empty() {
+            let before_event = &before_indexed_events[0].event;
+            let after_event = &after_indexed_events[0].event;
             // Ensure before event mentions external call
             if !before_event.detail.to_lowercase().contains("external code") {
                 break;
@@ -451,8 +454,8 @@ fn check_for_library_call_inlined(
             if after_event.event_source != EventSource::InlinedChain {
                 break;
             }
-            related_before_events.push(before_events.pop_front().unwrap());
-            related_after_events.push(after_events.pop_front().unwrap());
+            related_before_events.push(before_indexed_events.pop_front().unwrap().event);
+            related_after_events.push(after_indexed_events.pop_front().unwrap().event);
         }
 
         if related_before_events.is_empty() || related_after_events.is_empty() {
@@ -475,44 +478,47 @@ fn check_for_library_call_inlined(
 // -   CT: Jump to external code
 // -   RF: Jump to external code
 fn check_for_library_call_removed(
-    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
+    grouped_indexed_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<IndexedEvent>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
-    for (diff_op, change_tuples_events) in grouped_events {
+    for (diff_op, change_tuples_indexed_events) in grouped_indexed_events {
         // Diff op for this region should be delete
         if diff_op.tag() != DiffTag::Delete {
             continue;
         }
 
         // Should have a single tuple with deleted lines
-        assert!(change_tuples_events.len() == 1);
-        let (change_tag, events) = &mut change_tuples_events[0];
+        assert!(change_tuples_indexed_events.len() == 1);
+        let (change_tag, indexed_events) = &mut change_tuples_indexed_events[0];
         assert!(*change_tag == ChangeTag::Delete);
 
         // Must have at least 3 events
-        if events.len() < 3 {
+        if indexed_events.len() < 3 {
             continue;
         }
 
         // First event should be call from traced binary
-        if events[0].event_type != EventType::CallFrom {
+        let first_event = &indexed_events[0].event;
+        if first_event.event_type != EventType::CallFrom {
             continue;
         }
 
         // Second event should be call to external library
-        if events[1].event_type != EventType::CallTo {
+        let second_event = &indexed_events[1].event;
+        if second_event.event_type != EventType::CallTo {
             continue;
         }
-        if !events[1].detail.to_lowercase().contains("external code") {
+        if !second_event.detail.to_lowercase().contains("external code") {
             continue;
         }
 
         // Third event should be return from external library
-        if events[2].event_type != EventType::ReturnFrom {
+        let third_event = &indexed_events[2].event;
+        if third_event.event_type != EventType::ReturnFrom {
             continue;
         }
-        if !events[2].detail.to_lowercase().contains("external code") {
+        if !third_event.detail.to_lowercase().contains("external code") {
             continue;
         }
 
@@ -521,9 +527,9 @@ fn check_for_library_call_removed(
         let related_after_events = vec![];
 
         // First 3 are known to match
-        related_before_events.push(events.pop_front().unwrap());
-        related_before_events.push(events.pop_front().unwrap());
-        related_before_events.push(events.pop_front().unwrap());
+        related_before_events.push(indexed_events.pop_front().unwrap().event);
+        related_before_events.push(indexed_events.pop_front().unwrap().event);
+        related_before_events.push(indexed_events.pop_front().unwrap().event);
 
         divergences.push(Divergence::new(
             DivergenceType::LibraryCallRemoved,
@@ -541,23 +547,23 @@ fn check_for_library_call_removed(
 // -   CT: git_has_dos_drive_prefix at git-compat-util.h:432:0
 // -   RF: git_has_dos_drive_prefix at git-compat-util.h:433:2
 fn check_for_program_call_removed(
-    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
+    grouped_indexed_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<IndexedEvent>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
-    for (diff_op, change_tuples_events) in grouped_events {
+    for (diff_op, change_tuples_indexed_events) in grouped_indexed_events {
         // Diff op for this region should be delete
         if diff_op.tag() != DiffTag::Delete {
             continue;
         }
 
         // Should have a single tuple with deleted lines
-        assert!(change_tuples_events.len() == 1);
-        let (change_tag, events) = &mut change_tuples_events[0];
+        assert!(change_tuples_indexed_events.len() == 1);
+        let (change_tag, indexed_events) = &mut change_tuples_indexed_events[0];
         assert!(*change_tag == ChangeTag::Delete);
 
         // Must have at least 3 events
-        if events.len() < 3 {
+        if indexed_events.len() < 3 {
             continue;
         }
 
@@ -565,29 +571,32 @@ fn check_for_program_call_removed(
         // Call to and return from should not mention external code.
         // There may be any number of additionally removed events
         // between the call to and return from.
-        if events[0].event_type != EventType::CallFrom {
+        let first_event = &indexed_events[0].event;
+        if first_event.event_type != EventType::CallFrom {
             continue;
         }
-        if events[1].event_type != EventType::CallTo {
+        let second_event = &indexed_events[1].event;
+        if second_event.event_type != EventType::CallTo {
             continue;
         }
-        if events[1].detail.to_lowercase().contains("external code") {
+        if second_event.detail.to_lowercase().contains("external code") {
             continue;
         }
         // Look for last return from the called function in this block
-        let called_function = &events[1].location.function;
+        let called_function = &second_event.location.function;
         if called_function.is_none() {
             continue;
         }
         let mut last_return_from: Option<usize> = None;
-        for i in 2..events.len() {
-            if events[i].event_type != EventType::ReturnFrom {
+        for i in 2..indexed_events.len() {
+            let event = &indexed_events[i].event;
+            if event.event_type != EventType::ReturnFrom {
                 continue;
             }
-            if events[i].detail.to_lowercase().contains("external code") {
+            if event.detail.to_lowercase().contains("external code") {
                 continue;
             }
-            if events[i].location.function != *called_function {
+            if event.location.function != *called_function {
                 continue;
             }
             last_return_from = Some(i);
@@ -597,7 +606,10 @@ fn check_for_program_call_removed(
         }
 
         // Extract related events
-        let related_before_events = events.drain(0..=last_return_from.unwrap()).collect();
+        let related_before_events = indexed_events
+            .drain(0..=last_return_from.unwrap())
+            .map(|ie| ie.event)
+            .collect();
         let related_after_events = vec![];
 
         divergences.push(Divergence::new(
@@ -615,55 +627,57 @@ fn check_for_program_call_removed(
 // + IRF: get_builtin at git.c:0:0
 // + ICT: get_builtin at git.c:635:0
 fn check_for_inlined_reentry_added(
-    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
+    grouped_indexed_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<IndexedEvent>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
-    for (diff_op, change_tuples_events) in grouped_events {
+    for (diff_op, change_tuples_indexed_events) in grouped_indexed_events {
         // Diff op for this region should be insert
         if diff_op.tag() != DiffTag::Insert {
             continue;
         }
 
         // Should have a single tuple with inserted lines
-        assert!(change_tuples_events.len() == 1);
-        let (change_tag, events) = &mut change_tuples_events[0];
+        assert!(change_tuples_indexed_events.len() == 1);
+        let (change_tag, indexed_events) = &mut change_tuples_indexed_events[0];
         assert!(*change_tag == ChangeTag::Insert);
 
         // Must have at least 2 events
-        if events.len() < 2 {
+        if indexed_events.len() < 2 {
             continue;
         };
 
         // First event should be inlined return from
-        if events[0].event_source != EventSource::InlinedChain {
+        let first_event = &indexed_events[0].event;
+        if first_event.event_source != EventSource::InlinedChain {
             continue;
         }
-        if events[0].event_type != EventType::ReturnFrom {
+        if first_event.event_type != EventType::ReturnFrom {
             continue;
         }
 
         // Second event should be inlined call to
-        if events[1].event_source != EventSource::InlinedChain {
+        let second_event = &indexed_events[1].event;
+        if second_event.event_source != EventSource::InlinedChain {
             continue;
         }
-        if events[1].event_type != EventType::CallTo {
+        if second_event.event_type != EventType::CallTo {
             continue;
         }
 
         // Events should have the same function name
-        if events[0].location.function.is_none() || events[1].location.function.is_none() {
+        if first_event.location.function.is_none() || second_event.location.function.is_none() {
             continue;
         }
-        if events[0].location.function != events[1].location.function {
+        if first_event.location.function != second_event.location.function {
             continue;
         }
 
         // Extract related events
         let related_before_events = vec![];
         let mut related_after_events = vec![];
-        related_after_events.push(events.pop_front().unwrap());
-        related_after_events.push(events.pop_front().unwrap());
+        related_after_events.push(indexed_events.pop_front().unwrap().event);
+        related_after_events.push(indexed_events.pop_front().unwrap().event);
 
         divergences.push(Divergence::new(
             DivergenceType::InlinedReentryAdded,
@@ -680,55 +694,57 @@ fn check_for_inlined_reentry_added(
 // + ICT: get_builtin at git.c:635:0
 // + IRF: get_builtin at git.c:0:0
 fn check_for_inlined_noise_added(
-    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
+    grouped_indexed_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<IndexedEvent>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
-    for (diff_op, change_tuples_events) in grouped_events {
+    for (diff_op, change_tuples_indexed_events) in grouped_indexed_events {
         // Diff op for this region should be insert
         if diff_op.tag() != DiffTag::Insert {
             continue;
         }
 
         // Should have a single tuple with inserted lines
-        assert!(change_tuples_events.len() == 1);
-        let (change_tag, events) = &mut change_tuples_events[0];
+        assert!(change_tuples_indexed_events.len() == 1);
+        let (change_tag, indexed_events) = &mut change_tuples_indexed_events[0];
         assert!(*change_tag == ChangeTag::Insert);
 
         // Must have at least 2 events
-        if events.len() < 2 {
+        if indexed_events.len() < 2 {
             continue;
         };
 
         // First event should be inlined call to
-        if events[0].event_source != EventSource::InlinedChain {
+        let first_event = &indexed_events[0].event;
+        if first_event.event_source != EventSource::InlinedChain {
             continue;
         }
-        if events[0].event_type != EventType::CallTo {
+        if first_event.event_type != EventType::CallTo {
             continue;
         }
 
         // Second event should be inlined return from
-        if events[1].event_source != EventSource::InlinedChain {
+        let second_event = &indexed_events[1].event;
+        if second_event.event_source != EventSource::InlinedChain {
             continue;
         }
-        if events[1].event_type != EventType::ReturnFrom {
+        if second_event.event_type != EventType::ReturnFrom {
             continue;
         }
 
         // Events should have the same function name
-        if events[0].location.function.is_none() || events[1].location.function.is_none() {
+        if first_event.location.function.is_none() || second_event.location.function.is_none() {
             continue;
         }
-        if events[0].location.function != events[1].location.function {
+        if first_event.location.function != second_event.location.function {
             continue;
         }
 
         // Extract related events
         let related_before_events = vec![];
         let mut related_after_events = vec![];
-        related_after_events.push(events.pop_front().unwrap());
-        related_after_events.push(events.pop_front().unwrap());
+        related_after_events.push(indexed_events.pop_front().unwrap().event);
+        related_after_events.push(indexed_events.pop_front().unwrap().event);
 
         divergences.push(Divergence::new(
             DivergenceType::InlinedNoiseAdded,
@@ -744,38 +760,39 @@ fn check_for_inlined_noise_added(
 // Example diff:
 // + IRF: check_commit at object-file.c:0:0
 fn check_for_inlined_return_added(
-    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
+    grouped_indexed_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<IndexedEvent>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
-    for (diff_op, change_tuples_events) in grouped_events {
+    for (diff_op, change_tuples_indexed_events) in grouped_indexed_events {
         // Diff op for this region should be insert
         if diff_op.tag() != DiffTag::Insert {
             continue;
         }
 
         // Should have a single tuple with inserted lines
-        assert!(change_tuples_events.len() == 1);
-        let (change_tag, events) = &mut change_tuples_events[0];
+        assert!(change_tuples_indexed_events.len() == 1);
+        let (change_tag, indexed_events) = &mut change_tuples_indexed_events[0];
         assert!(*change_tag == ChangeTag::Insert);
 
         // Must have at least 1 event
-        if events.len() < 1 {
+        if indexed_events.len() < 1 {
             continue;
         };
 
         // Event should be inlined return from
-        if events[0].event_source != EventSource::InlinedChain {
+        let first_event = &indexed_events[0].event;
+        if first_event.event_source != EventSource::InlinedChain {
             continue;
         }
-        if events[0].event_type != EventType::ReturnFrom {
+        if first_event.event_type != EventType::ReturnFrom {
             continue;
         }
 
         // Extract related events
         let related_before_events = vec![];
         let mut related_after_events = vec![];
-        related_after_events.push(events.pop_front().unwrap());
+        related_after_events.push(indexed_events.pop_front().unwrap().event);
 
         divergences.push(Divergence::new(
             DivergenceType::InlinedReturnAdded,
@@ -790,7 +807,7 @@ fn check_for_inlined_return_added(
 
 fn check_for_known_divergences(
     diff: &Diff<'_>,
-    grouped_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)],
+    grouped_indexed_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<IndexedEvent>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
     let mut uncategorised_grouped_events: HashMap<DiffOp, Vec<(ChangeTag, VecDeque<Event>)>> =
@@ -800,70 +817,70 @@ fn check_for_known_divergences(
     // JRS: Change patterns to produce all matching divergences up front...?
     loop {
         {
-            let mut divergences_found = check_for_coordinates_removed(grouped_events);
+            let mut divergences_found = check_for_coordinates_removed(grouped_indexed_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
                 continue;
             }
         }
         {
-            let mut divergences_found = check_for_coordinates_changed(grouped_events);
+            let mut divergences_found = check_for_coordinates_changed(grouped_indexed_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
                 continue;
             }
         }
         {
-            let mut divergences_found = check_for_library_call_added(grouped_events);
+            let mut divergences_found = check_for_library_call_added(grouped_indexed_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
                 continue;
             }
         }
         {
-            let mut divergences_found = check_for_library_call_replaced(grouped_events);
+            let mut divergences_found = check_for_library_call_replaced(grouped_indexed_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
                 continue;
             }
         }
         {
-            let mut divergences_found = check_for_library_call_inlined(grouped_events);
+            let mut divergences_found = check_for_library_call_inlined(grouped_indexed_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
                 continue;
             }
         }
         {
-            let mut divergences_found = check_for_library_call_removed(grouped_events);
+            let mut divergences_found = check_for_library_call_removed(grouped_indexed_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
                 continue;
             }
         }
         {
-            let mut divergences_found = check_for_program_call_removed(grouped_events);
+            let mut divergences_found = check_for_program_call_removed(grouped_indexed_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
                 continue;
             }
         }
         {
-            let mut divergences_found = check_for_inlined_reentry_added(grouped_events);
+            let mut divergences_found = check_for_inlined_reentry_added(grouped_indexed_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
                 continue;
             }
         }
         {
-            let mut divergences_found = check_for_inlined_noise_added(grouped_events);
+            let mut divergences_found = check_for_inlined_noise_added(grouped_indexed_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
                 continue;
             }
         }
         {
-            let mut divergences_found = check_for_inlined_return_added(grouped_events);
+            let mut divergences_found = check_for_inlined_return_added(grouped_indexed_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
                 continue;
@@ -873,11 +890,11 @@ fn check_for_known_divergences(
         // If any events remain, collect one from each tuple in preparation for
         // assembling an uncategorised divergence after checking what remains
         let mut moved_to_uncategorised = false;
-        for (diff_op, change_tuples_events) in &mut *grouped_events {
+        for (diff_op, change_tuples_indexed_events) in &mut *grouped_indexed_events {
             if diff_op.tag() == DiffTag::Equal {
                 continue;
             }
-            let events_present = change_tuples_events
+            let events_present = change_tuples_indexed_events
                 .iter()
                 .any(|(_, events)| !events.is_empty());
             if !events_present {
@@ -886,9 +903,14 @@ fn check_for_known_divergences(
             // Look for certain terms that suggest non-determinism
             static ND_RE: Lazy<Regex> =
                 Lazy::new(|| Regex::new(r"(sig|command|hash|alloc|env)").unwrap());
-            let nondeterminism_found = change_tuples_events
-                .iter()
-                .any(|(_, events)| events.iter().any(|e| ND_RE.is_match(&e.detail)));
+            let nondeterminism_found =
+                change_tuples_indexed_events
+                    .iter()
+                    .any(|(_, indexed_events)| {
+                        indexed_events
+                            .iter()
+                            .any(|ie| ND_RE.is_match(&ie.event.detail))
+                    });
             if nondeterminism_found {
                 // Return what we have and ignore the rest
                 return divergences;
@@ -899,19 +921,19 @@ fn check_for_known_divergences(
                     .entry(*diff_op)
                     .or_insert_with(|| {
                         let mut ctes: Vec<(ChangeTag, VecDeque<Event>)> = Vec::new();
-                        for (change_tag, _) in &*change_tuples_events {
+                        for (change_tag, _) in &*change_tuples_indexed_events {
                             ctes.push((*change_tag, VecDeque::new()));
                         }
                         ctes
                     });
             // Move one event from each tuple, then retry matching
-            for i in 0..change_tuples_events.len() {
-                let (change_tag, events) = &mut change_tuples_events[i];
+            for i in 0..change_tuples_indexed_events.len() {
+                let (change_tag, indexed_events) = &mut change_tuples_indexed_events[i];
                 if *change_tag == ChangeTag::Equal {
                     continue;
                 }
                 let (_, uncategorised_events) = &mut uncategorised_ctes[i];
-                uncategorised_events.push_back(events.pop_front().unwrap());
+                uncategorised_events.push_back(indexed_events.pop_front().unwrap().event);
                 moved_to_uncategorised = true;
             }
         }
@@ -963,6 +985,64 @@ fn print_events(events: &Vec<Event>) {
     }
 }
 
+fn to_change_tuples_indices(op: &DiffOp) -> Vec<(ChangeTag, VecDeque<usize>)> {
+    let mut change_tuples_indices = Vec::new();
+    match *op {
+        DiffOp::Equal { .. } => {
+            change_tuples_indices.push((ChangeTag::Equal, op.old_range().collect()));
+        }
+        DiffOp::Insert { .. } => {
+            change_tuples_indices.push((ChangeTag::Insert, op.new_range().collect()));
+        }
+        DiffOp::Delete { .. } => {
+            change_tuples_indices.push((ChangeTag::Delete, op.old_range().collect()));
+        }
+        DiffOp::Replace { .. } => {
+            change_tuples_indices.push((ChangeTag::Delete, op.old_range().collect()));
+            change_tuples_indices.push((ChangeTag::Insert, op.new_range().collect()));
+        }
+    }
+    change_tuples_indices
+}
+
+struct IndexedEvent {
+    index: usize,
+    event: Event,
+}
+
+fn collect_grouped_indexed_events(
+    diff: &Diff<'_>,
+    op_group: &Vec<DiffOp>,
+) -> Vec<(DiffOp, Vec<(ChangeTag, VecDeque<IndexedEvent>)>)> {
+    let mut grouped_indexed_events = vec![];
+
+    for op in op_group {
+        let change_tuples_indices = to_change_tuples_indices(op);
+        // TODO: Skip unnecessary collects / copies
+        let change_tuples_events: Vec<_> = op
+            .iter_slices(&diff.before_trace.events, &diff.after_trace.events)
+            .map(|(tag, events)| (tag, events.iter().cloned().collect::<VecDeque<_>>()))
+            .collect();
+        let change_tuples_indexed_events: Vec<(ChangeTag, VecDeque<IndexedEvent>)> =
+            change_tuples_indices
+                .into_iter()
+                .zip(change_tuples_events)
+                .map(|(it, et)| {
+                    assert!(it.0 == et.0);
+                    let indexed_events: VecDeque<IndexedEvent> =
+                        it.1.into_iter()
+                            .zip(et.1)
+                            .map(|(index, event)| IndexedEvent { index, event })
+                            .collect();
+                    (it.0, indexed_events)
+                })
+                .collect();
+        grouped_indexed_events.push((*op, change_tuples_indexed_events));
+    }
+
+    grouped_indexed_events
+}
+
 pub struct DivergenceAnalysis {
     remarks_by_location: Option<HashMap<Location, Remark>>,
     divergence_stats_by_coordinates: BTreeMap<Divergence, u64>,
@@ -985,19 +1065,11 @@ impl DivergenceAnalysis {
                 println!();
             }
 
-            let mut grouped_events: Vec<(DiffOp, Vec<(ChangeTag, VecDeque<Event>)>)> = vec![];
-
-            for op in op_group {
-                // TODO: Skip unnecessary collects / copies
-                let change_tuples_events: Vec<_> = op
-                    .iter_slices(&diff.before_trace.events, &diff.after_trace.events)
-                    .map(|(tag, events)| (tag, events.iter().cloned().collect::<VecDeque<_>>()))
-                    .collect();
-                grouped_events.push((*op, change_tuples_events));
-            }
+            let mut grouped_indexed_events = collect_grouped_indexed_events(diff, op_group);
 
             // Check events against known divergence patterns
-            let mut new_divergences = check_for_known_divergences(diff, &mut grouped_events);
+            let mut new_divergences =
+                check_for_known_divergences(diff, &mut grouped_indexed_events);
             for divergence in &mut new_divergences {
                 // If we'll print example trace lines, record trace path
                 if log_enabled!(log::Level::Info) {
@@ -1156,26 +1228,12 @@ mod tests {
                 new_len: 1,
             }])]),
         );
-        let change_tuples_events = Vec::from([
-            (
-                ChangeTag::Delete,
-                diff.before_trace
-                    .lines
-                    .iter()
-                    .map(|str| Event::parse(str).unwrap())
-                    .collect::<VecDeque<_>>(),
-            ),
-            (
-                ChangeTag::Insert,
-                diff.after_trace
-                    .lines
-                    .iter()
-                    .map(|str| Event::parse(str).unwrap())
-                    .collect::<VecDeque<_>>(),
-            ),
-        ]);
-        let mut grouped_events = [(diff.grouped_diff_ops[0][0], change_tuples_events)];
-        let divergences = check_for_known_divergences(&diff, &mut grouped_events);
+        let mut divergences: Vec<Divergence> = Vec::new();
+        for op_group in &diff.grouped_diff_ops {
+            let mut grouped_indexed_events = collect_grouped_indexed_events(&diff, op_group);
+            let mut new_divergences = check_for_known_divergences(&diff, &mut grouped_indexed_events);
+            divergences.append(&mut new_divergences);
+        }
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
@@ -1206,26 +1264,13 @@ mod tests {
                 new_len: 1,
             }])]),
         );
-        let change_tuples_events = Vec::from([
-            (
-                ChangeTag::Delete,
-                diff.before_trace
-                    .lines
-                    .iter()
-                    .map(|str| Event::parse(str).unwrap())
-                    .collect::<VecDeque<_>>(),
-            ),
-            (
-                ChangeTag::Insert,
-                diff.after_trace
-                    .lines
-                    .iter()
-                    .map(|str| Event::parse(str).unwrap())
-                    .collect::<VecDeque<_>>(),
-            ),
-        ]);
-        let mut grouped_events = [(diff.grouped_diff_ops[0][0], change_tuples_events)];
-        let divergences = check_for_known_divergences(&diff, &mut grouped_events);
+        let mut divergences: Vec<Divergence> = Vec::new();
+        for op_group in &diff.grouped_diff_ops {
+            let mut grouped_indexed_events = collect_grouped_indexed_events(&diff, op_group);
+            let mut new_divergences =
+                check_for_known_divergences(&diff, &mut grouped_indexed_events);
+            divergences.append(&mut new_divergences);
+        }
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
@@ -1260,24 +1305,13 @@ mod tests {
                 new_len: 2,
             }])]),
         );
-        let change_tuples_events = Vec::from([
-            (
-                ChangeTag::Delete,
-                diff.before_trace.lines[1..]
-                    .iter()
-                    .map(|str| Event::parse(str).unwrap())
-                    .collect::<VecDeque<_>>(),
-            ),
-            (
-                ChangeTag::Insert,
-                diff.after_trace.lines[1..]
-                    .iter()
-                    .map(|str| Event::parse(str).unwrap())
-                    .collect::<VecDeque<_>>(),
-            ),
-        ]);
-        let mut grouped_events = [(diff.grouped_diff_ops[0][0], change_tuples_events)];
-        let divergences = check_for_known_divergences(&diff, &mut grouped_events);
+        let mut divergences: Vec<Divergence> = Vec::new();
+        for op_group in &diff.grouped_diff_ops {
+            let mut grouped_indexed_events = collect_grouped_indexed_events(&diff, op_group);
+            let mut new_divergences =
+                check_for_known_divergences(&diff, &mut grouped_indexed_events);
+            divergences.append(&mut new_divergences);
+        }
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
@@ -1302,16 +1336,13 @@ mod tests {
                 new_index: 0,
             }])]),
         );
-        let change_tuples_events = Vec::from([(
-            ChangeTag::Delete,
-            diff.before_trace
-                .lines
-                .iter()
-                .map(|str| Event::parse(str).unwrap())
-                .collect::<VecDeque<_>>(),
-        )]);
-        let mut grouped_events = [(diff.grouped_diff_ops[0][0], change_tuples_events)];
-        let divergences = check_for_known_divergences(&diff, &mut grouped_events);
+        let mut divergences: Vec<Divergence> = Vec::new();
+        for op_group in &diff.grouped_diff_ops {
+            let mut grouped_indexed_events = collect_grouped_indexed_events(&diff, op_group);
+            let mut new_divergences =
+                check_for_known_divergences(&diff, &mut grouped_indexed_events);
+            divergences.append(&mut new_divergences);
+        }
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
@@ -1339,16 +1370,13 @@ mod tests {
                 new_index: 0,
             }])]),
         );
-        let change_tuples_events = Vec::from([(
-            ChangeTag::Delete,
-            diff.before_trace
-                .lines
-                .iter()
-                .map(|str| Event::parse(str).unwrap())
-                .collect::<VecDeque<_>>(),
-        )]);
-        let mut grouped_events = [(diff.grouped_diff_ops[0][0], change_tuples_events)];
-        let divergences = check_for_known_divergences(&diff, &mut grouped_events);
+        let mut divergences: Vec<Divergence> = Vec::new();
+        for op_group in &diff.grouped_diff_ops {
+            let mut grouped_indexed_events = collect_grouped_indexed_events(&diff, op_group);
+            let mut new_divergences =
+                check_for_known_divergences(&diff, &mut grouped_indexed_events);
+            divergences.append(&mut new_divergences);
+        }
         assert_eq!(divergences.len(), 2);
         for divergence in &divergences {
             assert_eq!(
@@ -1374,16 +1402,13 @@ mod tests {
                 new_index: 0,
             }])]),
         );
-        let change_tuples_events = Vec::from([(
-            ChangeTag::Delete,
-            diff.before_trace
-                .lines
-                .iter()
-                .map(|str| Event::parse(str).unwrap())
-                .collect::<VecDeque<_>>(),
-        )]);
-        let mut grouped_events = [(diff.grouped_diff_ops[0][0], change_tuples_events)];
-        let divergences = check_for_known_divergences(&diff, &mut grouped_events);
+        let mut divergences: Vec<Divergence> = Vec::new();
+        for op_group in &diff.grouped_diff_ops {
+            let mut grouped_indexed_events = collect_grouped_indexed_events(&diff, op_group);
+            let mut new_divergences =
+                check_for_known_divergences(&diff, &mut grouped_indexed_events);
+            divergences.append(&mut new_divergences);
+        }
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
@@ -1414,16 +1439,13 @@ mod tests {
                 new_index: 0,
             }])]),
         );
-        let change_tuples_events = Vec::from([(
-            ChangeTag::Delete,
-            diff.before_trace
-                .lines
-                .iter()
-                .map(|str| Event::parse(str).unwrap())
-                .collect::<VecDeque<_>>(),
-        )]);
-        let mut grouped_events = [(diff.grouped_diff_ops[0][0], change_tuples_events)];
-        let divergences = check_for_known_divergences(&diff, &mut grouped_events);
+        let mut divergences: Vec<Divergence> = Vec::new();
+        for op_group in &diff.grouped_diff_ops {
+            let mut grouped_indexed_events = collect_grouped_indexed_events(&diff, op_group);
+            let mut new_divergences =
+                check_for_known_divergences(&diff, &mut grouped_indexed_events);
+            divergences.append(&mut new_divergences);
+        }
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
@@ -1449,28 +1471,23 @@ mod tests {
                 new_index: 0,
             }])]),
         );
-        let change_tuples_events = Vec::from([(
-            ChangeTag::Delete,
-            diff.before_trace
-                .lines
-                .iter()
-                .map(|str| Event::parse(str).unwrap())
-                .collect::<VecDeque<_>>(),
-        )]);
-        let mut grouped_events = [(diff.grouped_diff_ops[0][0], change_tuples_events)];
-        let divergences = check_for_known_divergences(&diff, &mut grouped_events);
+        let mut divergences: Vec<Divergence> = Vec::new();
+        for op_group in &diff.grouped_diff_ops {
+            let mut grouped_indexed_events = collect_grouped_indexed_events(&diff, op_group);
+            let mut new_divergences =
+                check_for_known_divergences(&diff, &mut grouped_indexed_events);
+            divergences.append(&mut new_divergences);
+        }
         assert_eq!(divergences.len(), 2);
-        let program_call_removed_divergence = &divergences[0];
         assert_eq!(
-            program_call_removed_divergence.divergence_type,
+            divergences[0].divergence_type,
             DivergenceType::ProgramCallRemoved
         );
-        assert_eq!(program_call_removed_divergence.before_events.len(), 3);
-        let uncategorised_divergence = &divergences[1];
+        assert_eq!(divergences[0].before_events.len(), 3);
         assert_eq!(
-            uncategorised_divergence.divergence_type,
+            divergences[1].divergence_type,
             DivergenceType::Uncategorised
         );
-        assert_eq!(uncategorised_divergence.before_events.len(), 1);
+        assert_eq!(divergences[1].before_events.len(), 1);
     }
 }
