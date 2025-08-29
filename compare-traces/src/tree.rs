@@ -69,6 +69,12 @@ impl TreeNode {
         self.children.get(nth).map(|index| &tree[index])
     }
 
+    pub fn child_position<'tree>(&self, index: &TreeNodeIndex) -> Option<usize> {
+        self.children
+            .iter()
+            .position(|child_index| child_index == index)
+    }
+
     pub fn first_child<'tree>(&self, tree: &'tree Tree) -> Option<&'tree TreeNode> {
         self.children.first().map(|index| &tree[index])
     }

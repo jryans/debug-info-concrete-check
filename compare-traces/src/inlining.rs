@@ -113,11 +113,7 @@ fn cluster_inlined_call_children(trace: &mut Trace<'_>, inlined_call_edges: &Has
             // The current node is no longer needed, so remove from its parent
             let parent_index = tree[&node_index].parent.unwrap();
             let parent = &mut tree[&parent_index];
-            let current_position = parent
-                .children
-                .iter()
-                .position(|child_index| *child_index == node_index)
-                .unwrap();
+            let current_position = parent.child_position(&node_index).unwrap();
             parent.children.remove(current_position);
             // println!(
             //     "Removed current node {:?} from its parent {:?}",

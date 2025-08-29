@@ -299,11 +299,7 @@ fn edit_tree(tree: &mut Tree, edit: &TreeEditOp) {
         TreeEditOp::Remove { before_index } => {
             let parent_index = tree[before_index].parent.unwrap();
             let parent = &mut tree[&parent_index];
-            let child_position = parent
-                .children
-                .iter()
-                .position(|child_index| child_index == before_index)
-                .unwrap();
+            let child_position = parent.child_position(before_index).unwrap();
             parent.children.remove(child_position);
         }
         TreeEditOp::Move {
@@ -318,11 +314,7 @@ fn edit_tree(tree: &mut Tree, edit: &TreeEditOp) {
             // We support it here to allow testing the algorithm's examples.
             let same_parent = current_parent_index == *parent_index;
             let current_parent = &mut tree[&current_parent_index];
-            let current_child_position = current_parent
-                .children
-                .iter()
-                .position(|child_index| child_index == before_index)
-                .unwrap();
+            let current_child_position = current_parent.child_position(before_index).unwrap();
             let child = current_parent.children.remove(current_child_position);
             let target_parent = &mut tree[parent_index];
             let mut new_child_position = *child_position;
@@ -908,11 +900,7 @@ fn find_position_in_parent(
         break;
     }
     // Find right-most sibling to the left of after child that is in order
-    let after_child_position = after_parent
-        .children
-        .iter()
-        .position(|child_index| child_index == after_child_index)
-        .unwrap();
+    let after_child_position = after_parent.child_position(after_child_index).unwrap();
     let mut after_sibling_index = None;
     for after_index_to_check in after_parent.children[0..after_child_position].iter().rev() {
         if !after_in_order.contains(after_index_to_check) {
@@ -945,11 +933,7 @@ fn find_position_in_parent(
     // }
     // JRS: After trying a few examples,
     // I think the position just after the before sibling is what we want
-    let before_sibling_position = before_parent
-        .children
-        .iter()
-        .position(|child_index| child_index == before_sibling_index)
-        .unwrap();
+    let before_sibling_position = before_parent.child_position(before_sibling_index).unwrap();
     // Return position after sibling
     before_sibling_position + 1
 }
