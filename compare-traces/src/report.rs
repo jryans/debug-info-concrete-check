@@ -1209,6 +1209,17 @@ mod tests {
 
     use super::*;
 
+    fn collect_divergences(diff: &Diff<'_>) -> Vec<Divergence> {
+        let mut divergences: Vec<Divergence> = Vec::new();
+        for op_group in &diff.grouped_diff_ops {
+            let mut grouped_indexed_events = collect_grouped_indexed_events(&diff, op_group);
+            let mut new_divergences =
+                check_for_known_divergences(&diff, &mut grouped_indexed_events);
+            divergences.append(&mut new_divergences);
+        }
+        divergences
+    }
+
     #[test]
     fn parse_error() {
         let result = Event::parse("RF: do_xmalloc at     CT: External code");
@@ -1228,12 +1239,7 @@ mod tests {
                 new_len: 1,
             }])]),
         );
-        let mut divergences: Vec<Divergence> = Vec::new();
-        for op_group in &diff.grouped_diff_ops {
-            let mut grouped_indexed_events = collect_grouped_indexed_events(&diff, op_group);
-            let mut new_divergences = check_for_known_divergences(&diff, &mut grouped_indexed_events);
-            divergences.append(&mut new_divergences);
-        }
+        let divergences = collect_divergences(&diff);
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
@@ -1264,13 +1270,7 @@ mod tests {
                 new_len: 1,
             }])]),
         );
-        let mut divergences: Vec<Divergence> = Vec::new();
-        for op_group in &diff.grouped_diff_ops {
-            let mut grouped_indexed_events = collect_grouped_indexed_events(&diff, op_group);
-            let mut new_divergences =
-                check_for_known_divergences(&diff, &mut grouped_indexed_events);
-            divergences.append(&mut new_divergences);
-        }
+        let divergences = collect_divergences(&diff);
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
@@ -1305,13 +1305,7 @@ mod tests {
                 new_len: 2,
             }])]),
         );
-        let mut divergences: Vec<Divergence> = Vec::new();
-        for op_group in &diff.grouped_diff_ops {
-            let mut grouped_indexed_events = collect_grouped_indexed_events(&diff, op_group);
-            let mut new_divergences =
-                check_for_known_divergences(&diff, &mut grouped_indexed_events);
-            divergences.append(&mut new_divergences);
-        }
+        let divergences = collect_divergences(&diff);
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
@@ -1336,13 +1330,7 @@ mod tests {
                 new_index: 0,
             }])]),
         );
-        let mut divergences: Vec<Divergence> = Vec::new();
-        for op_group in &diff.grouped_diff_ops {
-            let mut grouped_indexed_events = collect_grouped_indexed_events(&diff, op_group);
-            let mut new_divergences =
-                check_for_known_divergences(&diff, &mut grouped_indexed_events);
-            divergences.append(&mut new_divergences);
-        }
+        let divergences = collect_divergences(&diff);
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
@@ -1370,13 +1358,7 @@ mod tests {
                 new_index: 0,
             }])]),
         );
-        let mut divergences: Vec<Divergence> = Vec::new();
-        for op_group in &diff.grouped_diff_ops {
-            let mut grouped_indexed_events = collect_grouped_indexed_events(&diff, op_group);
-            let mut new_divergences =
-                check_for_known_divergences(&diff, &mut grouped_indexed_events);
-            divergences.append(&mut new_divergences);
-        }
+        let divergences = collect_divergences(&diff);
         assert_eq!(divergences.len(), 2);
         for divergence in &divergences {
             assert_eq!(
@@ -1402,13 +1384,7 @@ mod tests {
                 new_index: 0,
             }])]),
         );
-        let mut divergences: Vec<Divergence> = Vec::new();
-        for op_group in &diff.grouped_diff_ops {
-            let mut grouped_indexed_events = collect_grouped_indexed_events(&diff, op_group);
-            let mut new_divergences =
-                check_for_known_divergences(&diff, &mut grouped_indexed_events);
-            divergences.append(&mut new_divergences);
-        }
+        let divergences = collect_divergences(&diff);
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
@@ -1439,13 +1415,7 @@ mod tests {
                 new_index: 0,
             }])]),
         );
-        let mut divergences: Vec<Divergence> = Vec::new();
-        for op_group in &diff.grouped_diff_ops {
-            let mut grouped_indexed_events = collect_grouped_indexed_events(&diff, op_group);
-            let mut new_divergences =
-                check_for_known_divergences(&diff, &mut grouped_indexed_events);
-            divergences.append(&mut new_divergences);
-        }
+        let divergences = collect_divergences(&diff);
         assert_eq!(divergences.len(), 1);
         let divergence = &divergences[0];
         assert_eq!(
@@ -1471,13 +1441,7 @@ mod tests {
                 new_index: 0,
             }])]),
         );
-        let mut divergences: Vec<Divergence> = Vec::new();
-        for op_group in &diff.grouped_diff_ops {
-            let mut grouped_indexed_events = collect_grouped_indexed_events(&diff, op_group);
-            let mut new_divergences =
-                check_for_known_divergences(&diff, &mut grouped_indexed_events);
-            divergences.append(&mut new_divergences);
-        }
+        let divergences = collect_divergences(&diff);
         assert_eq!(divergences.len(), 2);
         assert_eq!(
             divergences[0].divergence_type,
