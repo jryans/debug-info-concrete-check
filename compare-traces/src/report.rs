@@ -1075,19 +1075,20 @@ fn check_for_known_divergences(
     divergences
 }
 
-fn print_events(events: &Vec<Event>) {
+fn write_events<W: std::io::Write>(out: &mut W, events: &Vec<Event>) -> Result<()> {
     let event_count = events.len();
     if event_count <= 30 {
         for event in events {
-            println!("    {}", event);
+            writeln!(out, "    {}", event)?;
         }
     } else {
         let first_events = &events[..30];
         for event in first_events {
-            println!("    {}", event);
+            writeln!(out, "    {}", event)?;
         }
-        println!("    [...{} more events...]", event_count - 30);
+        writeln!(out, "    [...{} more events...]", event_count - 30)?;
     }
+    Ok(())
 }
 
 fn to_change_tuples_indices(op: &DiffOp) -> Vec<(ChangeTag, VecDeque<usize>)> {
@@ -1220,42 +1221,46 @@ impl DivergenceAnalysis {
         }
     }
 
-    pub fn print_report(&self) {
-        println!("## Divergences by source coordinates");
-        println!();
+    pub fn print_report(&self) -> Result<()> {
+        let mut out = std::io::stdout().lock();
+
+        writeln!(out, "## Divergences by source coordinates")?;
+        writeln!(out)?;
 
         let mut divergence_coordinates_count_by_type: BTreeMap<DivergenceType, u64> =
             BTreeMap::new();
         let mut divergence_events_count_by_type: BTreeMap<DivergenceType, u64> = BTreeMap::new();
         let mut occurrences_total: u64 = 0;
         for (divergence, occurrences) in &self.divergence_stats_by_coordinates {
-            println!("{:?}", divergence.divergence_type);
+            writeln!(out, "{:?}", divergence.divergence_type)?;
             if !divergence.before_events.is_empty() {
-                println!("  Before events:");
-                print_events(&divergence.before_events);
+                writeln!(out, "  Before events:")?;
+                write_events(&mut out, &divergence.before_events)?;
             }
             if !divergence.after_events.is_empty() {
-                println!("  After events:");
-                print_events(&divergence.after_events);
+                writeln!(out, "  After events:")?;
+                write_events(&mut out, &divergence.after_events)?;
             }
-            println!("  Occurrences: {}", occurrences);
+            writeln!(out, "  Occurrences: {}", occurrences)?;
             if let Some(pass) = &divergence.pass_responsible {
-                println!("  Pass responsible: {}", pass);
+                writeln!(out, "  Pass responsible: {}", pass)?;
             }
             if log_enabled!(log::Level::Info) {
-                println!("  Example trace lines:");
-                println!(
+                writeln!(out, "  Example trace lines:")?;
+                writeln!(
+                    out,
                     "    -{}:{}",
                     divergence.before_file_path.as_ref().unwrap().display(),
                     divergence.old_index
-                );
-                println!(
+                )?;
+                writeln!(
+                    out,
                     "    +{}:{}",
                     divergence.after_file_path.as_ref().unwrap().display(),
                     divergence.new_index
-                );
+                )?;
             }
-            println!();
+            writeln!(out)?;
             {
                 let coordinates_count = divergence_coordinates_count_by_type
                     .entry(divergence.divergence_type)
@@ -1271,33 +1276,38 @@ impl DivergenceAnalysis {
             occurrences_total += occurrences;
         }
 
-        println!("## Divergences with unique coordinates by type");
-        println!();
+        writeln!(out, "## Divergences with unique coordinates by type")?;
+        writeln!(out)?;
 
         for divergence_type in enum_iterator::all::<DivergenceType>() {
             if !divergence_coordinates_count_by_type.contains_key(&divergence_type) {
                 continue;
             }
-            println!("{:?}", divergence_type);
-            println!(
+            writeln!(out, "{:?}", divergence_type)?;
+            writeln!(
+                out,
                 "  Unique divergence coordinates: {}",
                 divergence_coordinates_count_by_type[&divergence_type]
-            );
-            println!(
+            )?;
+            writeln!(
+                out,
                 "  Divergence countable events: {}",
                 divergence_events_count_by_type[&divergence_type]
-            );
-            println!();
+            )?;
+            writeln!(out)?;
         }
 
-        println!("## Summary");
-        println!();
+        writeln!(out, "## Summary")?;
+        writeln!(out)?;
 
-        println!(
+        writeln!(
+            out,
             "{} unique divergence coordinates",
             self.divergence_stats_by_coordinates.len()
-        );
-        println!("{} divergence occurrences", occurrences_total);
+        )?;
+        writeln!(out, "{} divergence occurrences", occurrences_total)?;
+
+        Ok(())
     }
 
     pub fn print_countable_events_by_type(&self, events_by_type_dir: &PathBuf) -> Result<()> {

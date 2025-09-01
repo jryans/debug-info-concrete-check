@@ -233,7 +233,7 @@ fn main() -> Result<()> {
     progress.finish();
 
     if let Some(divergence_analysis) = divergence_analysis {
-        divergence_analysis.print_report();
+        divergence_analysis.print_report()?;
 
         if let Some(events_by_type_dir) = &cli.events_by_type_dir {
             if !events_by_type_dir.is_dir() {
