@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs::File;
 use std::hash::Hash;
 use std::io::Write;
@@ -15,6 +15,7 @@ use crate::diff::Diff;
 use crate::event::{Event, EventSource, EventType, Location};
 use crate::print::print_change_group;
 use crate::remarks::Remark;
+use crate::tree::TreeNodeIndex;
 
 #[derive(Sequence, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 enum DivergenceType {
@@ -760,7 +761,9 @@ fn check_for_inlined_noise_added(
 // Example diff:
 // + IRF: check_commit at object-file.c:0:0
 fn check_for_inlined_return_added(
+    diff: &Diff<'_>,
     grouped_indexed_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<IndexedEvent>)>)],
+    ignored_after_event_indices: &mut HashSet<usize>,
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
 
@@ -789,10 +792,40 @@ fn check_for_inlined_return_added(
             continue;
         }
 
+        // Capture matching event index before further mutation
+        let inlined_return_after_index = TreeNodeIndex::Node(indexed_events[0].index);
+
         // Extract related events
         let related_before_events = vec![];
         let mut related_after_events = vec![];
         related_after_events.push(indexed_events.pop_front().unwrap().event);
+
+        // Find other after events potentially affected by this.
+        // Any siblings after the return's parent are considered affected.
+        // TODO: Also find and remove the related before lines
+        let after_tree = &diff.after_trace.tree;
+        let inlined_return_node = &after_tree[&inlined_return_after_index];
+        let inlined_return_parent_node = inlined_return_node.parent(after_tree).unwrap();
+        let inlined_return_grandparent_node =
+            inlined_return_parent_node.parent(after_tree).unwrap();
+        let inlined_return_parent_position = inlined_return_grandparent_node
+            .child_position(&inlined_return_parent_node.index)
+            .unwrap();
+        let inlined_return_parent_sibling_indices = inlined_return_grandparent_node
+            .children
+            .get((inlined_return_parent_position + 1)..);
+        if let Some(inlined_return_parent_sibling_indices) = inlined_return_parent_sibling_indices {
+            for sibling_node_index in inlined_return_parent_sibling_indices {
+                let sibling_node = &after_tree[sibling_node_index];
+                for sibling_subtree_node in sibling_node.dfs_pre_order(after_tree) {
+                    // Add events to this divergence
+                    let event = sibling_subtree_node.data(&diff.after_trace.events).clone();
+                    related_after_events.push(event);
+                    // Mark events as ignored in case they may be part of a later confused block
+                    ignored_after_event_indices.insert(sibling_subtree_node.index.unwrap());
+                }
+            }
+        }
 
         divergences.push(Divergence::new(
             DivergenceType::InlinedReturnAdded,
@@ -808,10 +841,13 @@ fn check_for_inlined_return_added(
 fn check_for_known_divergences(
     diff: &Diff<'_>,
     grouped_indexed_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<IndexedEvent>)>)],
+    ignored_after_event_indices: &mut HashSet<usize>,
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
-    let mut uncategorised_grouped_events: HashMap<DiffOp, Vec<(ChangeTag, VecDeque<Event>)>> =
-        HashMap::new();
+    let mut uncategorised_grouped_indexed_events: HashMap<
+        DiffOp,
+        Vec<(ChangeTag, VecDeque<IndexedEvent>)>,
+    > = HashMap::new();
 
     // Check for divergences at least once and keep going each time more are found
     // JRS: Change patterns to produce all matching divergences up front...?
@@ -880,7 +916,11 @@ fn check_for_known_divergences(
             }
         }
         {
-            let mut divergences_found = check_for_inlined_return_added(grouped_indexed_events);
+            let mut divergences_found = check_for_inlined_return_added(
+                diff,
+                grouped_indexed_events,
+                ignored_after_event_indices,
+            );
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
                 continue;
@@ -916,24 +956,23 @@ fn check_for_known_divergences(
                 return divergences;
             }
             // Retrieve or create the uncategorised change tuples with events for this diff op
-            let uncategorised_ctes =
-                uncategorised_grouped_events
-                    .entry(*diff_op)
-                    .or_insert_with(|| {
-                        let mut ctes: Vec<(ChangeTag, VecDeque<Event>)> = Vec::new();
-                        for (change_tag, _) in &*change_tuples_indexed_events {
-                            ctes.push((*change_tag, VecDeque::new()));
-                        }
-                        ctes
-                    });
+            let uncategorised_cties = uncategorised_grouped_indexed_events
+                .entry(*diff_op)
+                .or_insert_with(|| {
+                    let mut cties: Vec<(ChangeTag, VecDeque<IndexedEvent>)> = Vec::new();
+                    for (change_tag, _) in &*change_tuples_indexed_events {
+                        cties.push((*change_tag, VecDeque::new()));
+                    }
+                    cties
+                });
             // Move one event from each tuple, then retry matching
             for i in 0..change_tuples_indexed_events.len() {
                 let (change_tag, indexed_events) = &mut change_tuples_indexed_events[i];
                 if *change_tag == ChangeTag::Equal {
                     continue;
                 }
-                let (_, uncategorised_events) = &mut uncategorised_ctes[i];
-                uncategorised_events.push_back(indexed_events.pop_front().unwrap().event);
+                let (_, uncategorised_indexed_events) = &mut uncategorised_cties[i];
+                uncategorised_indexed_events.push_back(indexed_events.pop_front().unwrap());
                 moved_to_uncategorised = true;
             }
         }
@@ -945,26 +984,39 @@ fn check_for_known_divergences(
     }
 
     // Assemble uncategorised divergences from whatever may remain
-    for (diff_op, change_tuples_events) in uncategorised_grouped_events {
+    for (diff_op, change_tuples_indexed_events) in uncategorised_grouped_indexed_events {
         let mut remaining_before_events = vec![];
         let mut remaining_after_events = vec![];
-        for (change_tag, mut events) in change_tuples_events {
+        for (change_tag, mut indexed_events) in change_tuples_indexed_events {
             if change_tag == ChangeTag::Equal {
                 continue;
             }
-            let mut collected_events = events.drain(..).collect::<Vec<_>>();
-            if change_tag == ChangeTag::Delete {
-                remaining_before_events.append(&mut collected_events);
-            } else {
-                remaining_after_events.append(&mut collected_events);
-            }
+            let mut collected_events = indexed_events
+                .drain(..)
+                .filter_map(|ie| match change_tag {
+                    ChangeTag::Delete => Some(ie.event),
+                    ChangeTag::Insert => match !ignored_after_event_indices.contains(&ie.index) {
+                        true => Some(ie.event),
+                        false => None,
+                    },
+                    ChangeTag::Equal => unreachable!(),
+                })
+                .collect::<Vec<_>>();
+            let remaining_events = match change_tag {
+                ChangeTag::Delete => &mut remaining_before_events,
+                ChangeTag::Insert => &mut remaining_after_events,
+                ChangeTag::Equal => unreachable!(),
+            };
+            remaining_events.append(&mut collected_events);
         }
-        divergences.push(Divergence::new(
-            DivergenceType::Uncategorised,
-            remaining_before_events,
-            remaining_after_events,
-            &diff_op,
-        ));
+        if !remaining_before_events.is_empty() || !remaining_after_events.is_empty() {
+            divergences.push(Divergence::new(
+                DivergenceType::Uncategorised,
+                remaining_before_events,
+                remaining_after_events,
+                &diff_op,
+            ));
+        }
     }
 
     divergences
@@ -1005,6 +1057,7 @@ fn to_change_tuples_indices(op: &DiffOp) -> Vec<(ChangeTag, VecDeque<usize>)> {
     change_tuples_indices
 }
 
+#[derive(Debug)]
 struct IndexedEvent {
     index: usize,
     event: Event,
@@ -1057,6 +1110,8 @@ impl DivergenceAnalysis {
     }
 
     pub fn analyse_diff(&mut self, diff: &Diff<'_>) {
+        let mut ignored_after_event_indices: HashSet<usize> = HashSet::new();
+
         for op_group in &diff.grouped_diff_ops {
             if log_enabled!(log::Level::Debug) {
                 println!("{:#?}", &op_group);
@@ -1068,8 +1123,11 @@ impl DivergenceAnalysis {
             let mut grouped_indexed_events = collect_grouped_indexed_events(diff, op_group);
 
             // Check events against known divergence patterns
-            let mut new_divergences =
-                check_for_known_divergences(diff, &mut grouped_indexed_events);
+            let mut new_divergences = check_for_known_divergences(
+                diff,
+                &mut grouped_indexed_events,
+                &mut ignored_after_event_indices,
+            );
             for divergence in &mut new_divergences {
                 // If we'll print example trace lines, record trace path
                 if log_enabled!(log::Level::Info) {
@@ -1210,11 +1268,15 @@ mod tests {
     use super::*;
 
     fn collect_divergences(diff: &Diff<'_>) -> Vec<Divergence> {
+        let mut ignored_after_event_indices: HashSet<usize> = HashSet::new();
         let mut divergences: Vec<Divergence> = Vec::new();
         for op_group in &diff.grouped_diff_ops {
             let mut grouped_indexed_events = collect_grouped_indexed_events(&diff, op_group);
-            let mut new_divergences =
-                check_for_known_divergences(&diff, &mut grouped_indexed_events);
+            let mut new_divergences = check_for_known_divergences(
+                &diff,
+                &mut grouped_indexed_events,
+                &mut ignored_after_event_indices,
+            );
             divergences.append(&mut new_divergences);
         }
         divergences
@@ -1453,5 +1515,131 @@ mod tests {
             DivergenceType::Uncategorised
         );
         assert_eq!(divergences[1].before_events.len(), 1);
+    }
+
+    #[test]
+    fn inlined_return_added() {
+        // Along with checking for an inlined return added divergence,
+        // this test also ensures the surrounding lines affected by that
+        // divergence do not end up as uncategorised.
+        // TODO: Also find and remove the related before lines
+
+        // Example diff:
+        // <  CT: check_commit at object-file.c:2328:0
+        // >  ICT: check_commit at object-file.c:2327:0
+        // ---
+        // +  IRF: check_commit at object-file.c:2332:7
+        // ---
+        // -  CF: check_commit at object-file.c:2332:7
+        // -    CT: _ at gettext.h:45:0
+        // -    CF: _ at gettext.h:48:9
+        // -      CT: Jump to external code for gettext
+        // -      RF: Jump to external code for gettext
+        // -    RF: _ at gettext.h:49:1
+        // ---
+        // +CF: index_mem at object-file.c:0:0
+        // +  CT: _ at gettext.h:45:0
+        // ---
+        // +  CF: _ at gettext.h:48:9
+        // +    CT: Jump to external code for dcgettext
+        // ---
+        // +    RF: Jump to external code for dcgettext
+        // +  RF: _ at gettext.h:49:1
+        // ---
+        // -  CF: check_commit at object-file.c:2332:3
+        // -    CT: die at usage.c:172:0
+        // ---
+        // +CF: index_mem at object-file.c:0:0
+        // +  CT: die at usage.c:172:0
+        let diff = Diff::new(
+            Trace::parse_lines(Vec::from([
+                "CF: index_mem at object-file.c:2370:4",
+                "  CT: check_commit at object-file.c:2328:0",
+                "  CF: check_commit at object-file.c:2331:6",
+                "    CT: parse_commit_buffer at commit.c:420:0",
+                "    RF: parse_commit_buffer at commit.c:501:1",
+                "  CF: check_commit at object-file.c:2332:7",
+                "    CT: _ at gettext.h:45:0",
+                "    CF: _ at gettext.h:48:9",
+                "      CT: Jump to external code for gettext",
+                "      RF: Jump to external code for gettext",
+                "    RF: _ at gettext.h:49:1",
+                "  CF: check_commit at object-file.c:2332:3",
+                "    CT: die at usage.c:172:0",
+            ])),
+            Trace::parse_lines(Vec::from([
+                "ICF: index_mem at object-file.c:2370:4",
+                "  ICT: check_commit at object-file.c:2327:0",
+                "  CF: check_commit at object-file.c:2331:6",
+                "    CT: parse_commit_buffer at commit.c:420:0",
+                "    RF: parse_commit_buffer at commit.c:501:1",
+                "  IRF: check_commit at object-file.c:2332:7",
+                "CF: index_mem at object-file.c:0:0",
+                "  CT: _ at gettext.h:45:0",
+                "  CF: _ at gettext.h:48:9",
+                "    CT: Jump to external code for dcgettext",
+                "    RF: Jump to external code for dcgettext",
+                "  RF: _ at gettext.h:49:1",
+                "CF: index_mem at object-file.c:0:0",
+                "  CT: die at usage.c:172:0",
+            ])),
+            Vec::from([
+                Vec::from([DiffOp::Replace {
+                    old_index: 1,
+                    old_len: 1,
+                    new_index: 1,
+                    new_len: 1,
+                }]),
+                Vec::from([DiffOp::Insert {
+                    old_index: 0,
+                    new_index: 5,
+                    new_len: 1,
+                }]),
+                Vec::from([DiffOp::Delete {
+                    old_index: 5,
+                    old_len: 6,
+                    new_index: 0,
+                }]),
+                Vec::from([DiffOp::Insert {
+                    old_index: 0,
+                    new_index: 6,
+                    new_len: 2,
+                }]),
+                Vec::from([DiffOp::Insert {
+                    old_index: 0,
+                    new_index: 8,
+                    new_len: 2,
+                }]),
+                Vec::from([DiffOp::Insert {
+                    old_index: 0,
+                    new_index: 10,
+                    new_len: 2,
+                }]),
+                Vec::from([DiffOp::Delete {
+                    old_index: 11,
+                    old_len: 2,
+                    new_index: 0,
+                }]),
+                Vec::from([DiffOp::Insert {
+                    old_index: 0,
+                    new_index: 12,
+                    new_len: 2,
+                }]),
+            ]),
+        );
+        let divergences = collect_divergences(&diff);
+        // println!("{:#?}", divergences);
+        assert_eq!(divergences.len(), 4);
+        assert_eq!(
+            divergences[0].divergence_type,
+            DivergenceType::CoordinatesChangedSmall
+        );
+        assert_eq!(divergences[0].old_index, 2);
+        assert_eq!(
+            divergences[1].divergence_type,
+            DivergenceType::InlinedReturnAdded
+        );
+        assert_eq!(divergences[1].new_index, 6);
+        assert_eq!(divergences[1].after_events.len(), 9);
     }
 }
