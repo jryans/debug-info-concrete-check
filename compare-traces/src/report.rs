@@ -1200,6 +1200,7 @@ impl DivergenceAnalysis {
 
         let mut divergence_coordinates_count_by_type: BTreeMap<DivergenceType, u64> =
             BTreeMap::new();
+        let mut divergence_events_count_by_type: BTreeMap<DivergenceType, u64> = BTreeMap::new();
         let mut occurrences_total: u64 = 0;
         for (divergence, occurrences) in &self.divergence_stats_by_coordinates {
             println!("{:?}", divergence.divergence_type);
@@ -1229,12 +1230,18 @@ impl DivergenceAnalysis {
                 );
             }
             println!();
-            if let Some(count) =
-                divergence_coordinates_count_by_type.get_mut(&divergence.divergence_type)
             {
-                *count += 1;
-            } else {
-                divergence_coordinates_count_by_type.insert(divergence.divergence_type.clone(), 1);
+                let coordinates_count = divergence_coordinates_count_by_type
+                    .entry(divergence.divergence_type)
+                    .or_default();
+                *coordinates_count += 1;
+            }
+            if log_enabled!(log::Level::Info) {
+                let events_count = divergence_events_count_by_type
+                    .entry(divergence.divergence_type)
+                    .or_default();
+                *events_count += divergence.before_events.len() as u64;
+                *events_count += divergence.after_events.len() as u64;
             }
             occurrences_total += occurrences;
         }
@@ -1242,9 +1249,21 @@ impl DivergenceAnalysis {
         println!("## Divergences with unique coordinates by type");
         println!();
 
-        for (divergence_type, count) in &divergence_coordinates_count_by_type {
+        for divergence_type in enum_iterator::all::<DivergenceType>() {
+            if !divergence_coordinates_count_by_type.contains_key(&divergence_type) {
+                continue;
+            }
             println!("{:?}", divergence_type);
-            println!("  Unique divergence coordinates: {}", count);
+            println!(
+                "  Unique divergence coordinates: {}",
+                divergence_coordinates_count_by_type[&divergence_type]
+            );
+            if log_enabled!(log::Level::Info) {
+                println!(
+                    "  Divergence events: {}",
+                    divergence_events_count_by_type[&divergence_type]
+                );
+            }
             println!();
         }
 
