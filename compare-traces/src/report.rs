@@ -108,6 +108,16 @@ impl Divergence {
             &self.after_events[0].location
         }
     }
+
+    fn countable_events(&self) -> &Vec<Event> {
+        let mut countable_events = &self.before_events;
+        // In the less common case of only added events,
+        // let's use those so we at least have something to count
+        if countable_events.is_empty() {
+            countable_events = &self.after_events;
+        }
+        countable_events
+    }
 }
 
 impl PartialEq for Divergence {
@@ -1252,12 +1262,11 @@ impl DivergenceAnalysis {
                     .or_default();
                 *coordinates_count += 1;
             }
-            if log_enabled!(log::Level::Info) {
+            {
                 let events_count = divergence_events_count_by_type
                     .entry(divergence.divergence_type)
                     .or_default();
-                *events_count += divergence.before_events.len() as u64;
-                *events_count += divergence.after_events.len() as u64;
+                *events_count += divergence.countable_events().len() as u64;
             }
             occurrences_total += occurrences;
         }
@@ -1274,12 +1283,10 @@ impl DivergenceAnalysis {
                 "  Unique divergence coordinates: {}",
                 divergence_coordinates_count_by_type[&divergence_type]
             );
-            if log_enabled!(log::Level::Info) {
-                println!(
-                    "  Divergence events: {}",
-                    divergence_events_count_by_type[&divergence_type]
-                );
-            }
+            println!(
+                "  Divergence countable events: {}",
+                divergence_events_count_by_type[&divergence_type]
+            );
             println!();
         }
 
@@ -1308,13 +1315,7 @@ impl DivergenceAnalysis {
 
         for divergence in self.divergence_stats_by_coordinates.keys() {
             let mut file = &files_by_type[&divergence.divergence_type];
-            let mut printable_events = &divergence.before_events;
-            // In the less common case of only added events,
-            // let's use those so we at least have something to count
-            if printable_events.is_empty() {
-                printable_events = &divergence.after_events;
-            }
-            for event in printable_events {
+            for event in divergence.countable_events() {
                 writeln!(file, "{}", event)?;
             }
         }
