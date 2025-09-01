@@ -795,6 +795,25 @@ fn check_for_inlined_return_added(
         // Capture matching event index before further mutation
         let inlined_return_after_index = TreeNodeIndex::Node(indexed_events[0].index);
 
+        // Event should truly end the frame (not be clustered inlined noise)
+        let after_tree = &diff.after_trace.tree;
+        let inlined_return_node = &after_tree[&inlined_return_after_index];
+        let inlined_return_parent_node = inlined_return_node.parent(after_tree).unwrap();
+        if *inlined_return_parent_node.children.last().unwrap() != inlined_return_after_index {
+            continue;
+        }
+
+        // Next after event should be call from with zeroed location
+        let next_after_index = TreeNodeIndex::Node(indexed_events[0].index + 1);
+        let next_after_node = &diff.after_trace.tree[&next_after_index];
+        let next_after_event = next_after_node.data(&diff.after_trace.events);
+        if next_after_event.event_type != EventType::CallFrom {
+            continue;
+        }
+        if next_after_event.location.line != Some(0) {
+            continue;
+        }
+
         // Extract related events
         let related_before_events = vec![];
         let mut related_after_events = vec![];
@@ -803,9 +822,6 @@ fn check_for_inlined_return_added(
         // Find other after events potentially affected by this.
         // Any siblings after the return's parent are considered affected.
         // TODO: Also find and remove the related before lines
-        let after_tree = &diff.after_trace.tree;
-        let inlined_return_node = &after_tree[&inlined_return_after_index];
-        let inlined_return_parent_node = inlined_return_node.parent(after_tree).unwrap();
         let inlined_return_grandparent_node =
             inlined_return_parent_node.parent(after_tree).unwrap();
         let inlined_return_parent_position = inlined_return_grandparent_node
