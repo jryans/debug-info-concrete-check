@@ -852,6 +852,37 @@ fn check_for_known_divergences(
     // Check for divergences at least once and keep going each time more are found
     // JRS: Change patterns to produce all matching divergences up front...?
     loop {
+        // Previous iterations may have ignored some events, remove these if found
+        for (diff_op, change_tuples_indexed_events) in &mut *grouped_indexed_events {
+            if diff_op.tag() == DiffTag::Equal {
+                continue;
+            }
+            // Examine after-only diffs for now.
+            // Checking replacements without also ignoring before events leads to
+            // many uncategorised blocks.
+            if diff_op.tag() != DiffTag::Insert {
+                continue;
+            }
+            let events_present = change_tuples_indexed_events
+                .iter()
+                .any(|(_, events)| !events.is_empty());
+            if !events_present {
+                continue;
+            }
+            for (_, indexed_events) in change_tuples_indexed_events {
+                let mut i: usize = 0;
+                // Double-check end condition each iteration, as we may remove events
+                while i < indexed_events.len() {
+                    if ignored_after_event_indices.contains(&indexed_events[i].index) {
+                        indexed_events.remove(i);
+                        continue;
+                    }
+                    i += 1;
+                }
+            }
+        }
+
+        // Check each pattern
         {
             let mut divergences_found = check_for_coordinates_removed(grouped_indexed_events);
             if !divergences_found.is_empty() {
@@ -971,6 +1002,9 @@ fn check_for_known_divergences(
                 if *change_tag == ChangeTag::Equal {
                     continue;
                 }
+                if indexed_events.is_empty() {
+                    continue;
+                }
                 let (_, uncategorised_indexed_events) = &mut uncategorised_cties[i];
                 uncategorised_indexed_events.push_back(indexed_events.pop_front().unwrap());
                 moved_to_uncategorised = true;
@@ -993,14 +1027,7 @@ fn check_for_known_divergences(
             }
             let mut collected_events = indexed_events
                 .drain(..)
-                .filter_map(|ie| match change_tag {
-                    ChangeTag::Delete => Some(ie.event),
-                    ChangeTag::Insert => match !ignored_after_event_indices.contains(&ie.index) {
-                        true => Some(ie.event),
-                        false => None,
-                    },
-                    ChangeTag::Equal => unreachable!(),
-                })
+                .map(|ie| ie.event)
                 .collect::<Vec<_>>();
             let remaining_events = match change_tag {
                 ChangeTag::Delete => &mut remaining_before_events,
