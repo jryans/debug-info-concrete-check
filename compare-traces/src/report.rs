@@ -35,6 +35,23 @@ enum DivergenceType {
 }
 
 impl DivergenceType {
+    fn to_type_name(&self) -> &str {
+        match self {
+            DivergenceType::CoordinatesRemoved => "Coordinates removed",
+            DivergenceType::CoordinatesChangedSmall => "Coordinates changed (small)",
+            DivergenceType::CoordinatesChangedLarge => "Coordinates changed (large)",
+            DivergenceType::LibraryCallAdded => "Library call added",
+            DivergenceType::LibraryCallReplaced => "Library call replaced",
+            DivergenceType::LibraryCallInlined => "Library call inlined",
+            DivergenceType::LibraryCallRemoved => "Library call removed",
+            DivergenceType::ProgramCallRemoved => "Program call removed",
+            DivergenceType::InlinedReentryAdded => "Inlined reentry added",
+            DivergenceType::InlinedNoiseAdded => "Inlined noise added",
+            DivergenceType::InlinedReturnAdded => "Inlined return added",
+            DivergenceType::Uncategorised => "Uncategorised",
+        }
+    }
+
     fn to_file_name(&self) -> &str {
         match self {
             DivergenceType::CoordinatesRemoved => "coordinates-removed",
@@ -1232,7 +1249,7 @@ impl DivergenceAnalysis {
         let mut divergence_events_count_by_type: BTreeMap<DivergenceType, u64> = BTreeMap::new();
         let mut occurrences_total: u64 = 0;
         for (divergence, occurrences) in &self.divergence_stats_by_coordinates {
-            writeln!(out, "{:?}", divergence.divergence_type)?;
+            writeln!(out, "{}", divergence.divergence_type.to_type_name())?;
             if !divergence.before_events.is_empty() {
                 writeln!(out, "  Before events:")?;
                 write_events(&mut out, &divergence.before_events)?;
@@ -1283,7 +1300,7 @@ impl DivergenceAnalysis {
             if !divergence_coordinates_count_by_type.contains_key(&divergence_type) {
                 continue;
             }
-            writeln!(out, "{:?}", divergence_type)?;
+            writeln!(out, "{}", divergence_type.to_type_name())?;
             writeln!(
                 out,
                 "  Unique divergence coordinates: {}",
