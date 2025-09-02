@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs::File;
 use std::hash::Hash;
-use std::io::Write;
+use std::io::{stdout, BufWriter, Write};
 use std::path::PathBuf;
 
 use anyhow::{Context, Ok, Result};
@@ -1222,7 +1222,7 @@ impl DivergenceAnalysis {
     }
 
     pub fn print_report(&self) -> Result<()> {
-        let mut out = std::io::stdout().lock();
+        let mut out = BufWriter::new(stdout().lock());
 
         writeln!(out, "## Divergences by source coordinates")?;
         writeln!(out)?;
@@ -1307,11 +1307,13 @@ impl DivergenceAnalysis {
         )?;
         writeln!(out, "{} divergence occurrences", occurrences_total)?;
 
+        out.flush()?;
+
         Ok(())
     }
 
     pub fn print_countable_events_by_type(&self, events_by_type_dir: &PathBuf) -> Result<()> {
-        let mut files_by_type: HashMap<DivergenceType, File> = HashMap::new();
+        let mut file_writers_by_type: HashMap<DivergenceType, BufWriter<File>> = HashMap::new();
         for divergence_type in enum_iterator::all::<DivergenceType>() {
             let file_path = events_by_type_dir.join(divergence_type.to_file_name());
             let file = File::create(&file_path).with_context(|| {
@@ -1320,14 +1322,21 @@ impl DivergenceAnalysis {
                     file_path.display()
                 )
             })?;
-            files_by_type.insert(divergence_type, file);
+            let writer = BufWriter::new(file);
+            file_writers_by_type.insert(divergence_type, writer);
         }
 
         for divergence in self.divergence_stats_by_coordinates.keys() {
-            let mut file = &files_by_type[&divergence.divergence_type];
+            let writer = file_writers_by_type
+                .get_mut(&divergence.divergence_type)
+                .unwrap();
             for event in divergence.countable_events() {
-                writeln!(file, "{}", event)?;
+                writeln!(writer, "{}", event)?;
             }
+        }
+
+        for (_, writer) in file_writers_by_type.iter_mut() {
+            writer.flush()?;
         }
 
         Ok(())
