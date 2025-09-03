@@ -831,6 +831,9 @@ fn check_for_inlined_return_added(
         }
 
         // Next after event should be call from with zeroed location
+        if indexed_events[0].index + 1 >= diff.after_trace.tree.nodes.len() {
+            continue;
+        }
         let next_after_index = TreeNodeIndex::Node(indexed_events[0].index + 1);
         let next_after_node = &diff.after_trace.tree[&next_after_index];
         let next_after_event = next_after_node.data(&diff.after_trace.events);
