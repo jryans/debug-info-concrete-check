@@ -722,6 +722,7 @@ fn check_for_inlined_reentry_added(
 // + ICT: get_builtin at git.c:635:0
 // + IRF: get_builtin at git.c:0:0
 fn check_for_inlined_noise_added(
+    diff: &Diff<'_>,
     grouped_indexed_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<IndexedEvent>)>)],
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
@@ -765,6 +766,18 @@ fn check_for_inlined_noise_added(
             continue;
         }
         if first_event.location.function != second_event.location.function {
+            continue;
+        }
+
+        // Capture matching event index before further mutation
+        let inlined_noise_after_index = TreeNodeIndex::Node(indexed_events[0].index);
+
+        // Event should not be the first child of its parent
+        // (noise pattern only matches _additional_ call / return pairs)
+        let after_tree = &diff.after_trace.tree;
+        let inlined_noise_node = &after_tree[&inlined_noise_after_index];
+        let inlined_noise_parent_node = inlined_noise_node.parent(after_tree).unwrap();
+        if *inlined_noise_parent_node.children.first().unwrap() == inlined_noise_after_index {
             continue;
         }
 
@@ -986,7 +999,7 @@ fn check_for_known_divergences(
             }
         }
         {
-            let mut divergences_found = check_for_inlined_noise_added(grouped_indexed_events);
+            let mut divergences_found = check_for_inlined_noise_added(diff, grouped_indexed_events);
             if !divergences_found.is_empty() {
                 divergences.append(&mut divergences_found);
                 continue;
