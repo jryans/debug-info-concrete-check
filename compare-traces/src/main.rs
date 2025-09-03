@@ -14,7 +14,7 @@ use tree_diff::diff_tree;
 use walkdir::WalkDir;
 
 use crate::event::Location;
-use crate::inlining::preprocess_inlining;
+use crate::inlining::{preprocess_inlining, InliningTransform};
 use crate::print::print_diff;
 use crate::remarks::{load_remarks, Remark};
 use crate::report::DivergenceAnalysis;
@@ -65,6 +65,10 @@ struct Cli {
     /// Strategy to use when comparing traces to reveal divergences
     #[arg(long, value_enum, default_value_t = DiffStrategy::Tree)]
     diff_strategy: DiffStrategy,
+
+    /// Approach to use when transforming inlined traces
+    #[arg(long, value_enum, default_value_t = InliningTransform::Clustered)]
+    inlining_transform: InliningTransform,
 
     /// Whether to save traces to new files just after the inlining transform
     #[arg(long)]
@@ -159,7 +163,8 @@ fn main() -> Result<()> {
                 let mut before = Trace::parse_str(&before_content);
                 let mut after = Trace::parse_str(&after_content);
 
-                preprocess_inlining(&mut before, &mut after);
+                let transform = cli.inlining_transform;
+                preprocess_inlining(&mut before, &mut after, transform);
 
                 // Compacting adjacent events depends on their indices reflecting
                 // lines they'd have in printed trace, so re-numbering is required
@@ -173,15 +178,16 @@ fn main() -> Result<()> {
                     assert!(cli.before_file_or_dir.is_dir());
                     assert!(cli.after_file_or_dir.is_dir());
                     let mut before_file_inlining_dir = before_file.parent().unwrap().to_path_buf();
-                    before_file_inlining_dir.set_file_name(
+                    before_file_inlining_dir.set_file_name(format!(
+                        "{}-inlining-{}",
                         before_file_inlining_dir
                             .file_name()
                             .unwrap()
                             .to_str()
                             .unwrap()
-                            .to_string()
-                            + "-inlining-transformed",
-                    );
+                            .to_string(),
+                        transform.to_file_name(),
+                    ));
                     fs::create_dir_all(&before_file_inlining_dir)?;
                     let before_file_inlining_path =
                         before_file_inlining_dir.join(before_file.file_name().unwrap());
@@ -190,15 +196,16 @@ fn main() -> Result<()> {
                     write!(&mut before_file_inlining, "{}", before)?;
                     before_file_inlining.flush()?;
                     let mut after_file_inlining_dir = after_file.parent().unwrap().to_path_buf();
-                    after_file_inlining_dir.set_file_name(
+                    after_file_inlining_dir.set_file_name(format!(
+                        "{}-inlining-{}",
                         after_file_inlining_dir
                             .file_name()
                             .unwrap()
                             .to_str()
                             .unwrap()
-                            .to_string()
-                            + "-inlining-transformed",
-                    );
+                            .to_string(),
+                        transform.to_file_name(),
+                    ));
                     fs::create_dir_all(&after_file_inlining_dir)?;
                     let after_file_inlining_path =
                         after_file_inlining_dir.join(after_file.file_name().unwrap());

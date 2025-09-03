@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use clap::ValueEnum;
+
 use crate::event::{Event, EventSource, EventType, Location};
 use crate::trace::Trace;
 use crate::tree::TreeNodeIndex;
@@ -61,7 +63,28 @@ fn gather_inlined_call_edges(trace: &Trace<'_>) -> HashSet<CallEdge> {
     inlined_call_edges
 }
 
-fn cluster_inlined_call_children(trace: &mut Trace<'_>, inlined_call_edges: &HashSet<CallEdge>) {
+#[derive(ValueEnum, Clone, Copy, Debug)]
+pub enum InliningTransform {
+    /// Cluster inlined call edges together, preserving each inlined call / return pair
+    Clustered,
+    /// Deduplicate inlined call edges, keeping only one call / return pair per edge
+    Deduplicated,
+}
+
+impl InliningTransform {
+    pub fn to_file_name(&self) -> &str {
+        match self {
+            InliningTransform::Clustered => "clustered",
+            InliningTransform::Deduplicated => "deduplicated",
+        }
+    }
+}
+
+fn cluster_inlined_call_children(
+    trace: &mut Trace<'_>,
+    inlined_call_edges: &HashSet<CallEdge>,
+    transform: InliningTransform,
+) {
     let mut inlined_call_edge_to_first_instance: HashMap<CallEdge, TreeNodeIndex> = HashMap::new();
     let mut current_parent: Option<TreeNodeIndex> = None;
     // Proceed through the tree breadth-first using mutable iterator
@@ -90,11 +113,18 @@ fn cluster_inlined_call_children(trace: &mut Trace<'_>, inlined_call_edges: &Has
                 inlined_call_edge_to_first_instance.insert(edge, node_index);
                 continue;
             }
-            // When an inlined call edge is found multiple times within the same parent, move all
-            // children of subsequent matching call edges to the first instance of that edge
+            // When an inlined call edge is found multiple times within the same parent, move
+            // children of subsequent matching call edges to the first instance of that edge.
+            // In deduplicating mode, the redundant call to and return from events are dropped.
             let mut children = {
                 let node = &mut tree[&node_index];
-                let cloned_children = node.children.clone();
+                let cloned_children = match transform {
+                    InliningTransform::Clustered => node.children.clone(),
+                    InliningTransform::Deduplicated => node.children[1..(node.children.len() - 1)]
+                        .iter()
+                        .cloned()
+                        .collect(),
+                };
                 node.children.clear();
                 cloned_children
             };
@@ -108,8 +138,20 @@ fn cluster_inlined_call_children(trace: &mut Trace<'_>, inlined_call_edges: &Has
             for child in &children {
                 tree[child].parent = Some(new_children_parent_index);
             }
+            // Place children into new parent.
+            // In deduplicating mode, any remaining children are moved just before the
+            // closing return from event, as they no longer have their own surrounding
+            // call to / return from pair.
             let new_children_parent = &mut tree[&new_children_parent_index];
-            new_children_parent.children.append(&mut children);
+            match transform {
+                InliningTransform::Clustered => new_children_parent.children.append(&mut children),
+                InliningTransform::Deduplicated => {
+                    let before_end = new_children_parent.children.len() - 1;
+                    new_children_parent
+                        .children
+                        .splice(before_end..before_end, children);
+                }
+            };
             // The current node is no longer needed, so remove from its parent
             let parent_index = tree[&node_index].parent.unwrap();
             let parent = &mut tree[&parent_index];
@@ -124,12 +166,16 @@ fn cluster_inlined_call_children(trace: &mut Trace<'_>, inlined_call_edges: &Has
     // println!();
 }
 
-pub fn preprocess_inlining(before: &mut Trace<'_>, after: &mut Trace<'_>) {
+pub fn preprocess_inlining(
+    before: &mut Trace<'_>,
+    after: &mut Trace<'_>,
+    transform: InliningTransform,
+) {
     // Gather all inlined call edges in after trace
     let inlined_call_edges = gather_inlined_call_edges(after);
     // Cluster inlined call children in each trace
-    cluster_inlined_call_children(before, &inlined_call_edges);
-    cluster_inlined_call_children(after, &inlined_call_edges);
+    cluster_inlined_call_children(before, &inlined_call_edges, transform);
+    cluster_inlined_call_children(after, &inlined_call_edges, transform);
 }
 
 #[cfg(test)]
@@ -206,7 +252,11 @@ RF: strbuf_vaddf at strbuf.c:408:1"
             .trim();
         let mut trace = Trace::parse_str(content);
         let inlined_call_edges = gather_inlined_call_edges(&trace);
-        cluster_inlined_call_children(&mut trace, &inlined_call_edges);
+        cluster_inlined_call_children(
+            &mut trace,
+            &inlined_call_edges,
+            InliningTransform::Clustered,
+        );
         let expected = "
 CT: strbuf_vaddf at strbuf.c:390:0
 ICF: strbuf_vaddf at strbuf.c:394:7
@@ -279,7 +329,11 @@ ICF: strbuf_vaddf at strbuf.c:395:3
             .trim();
         let mut trace = Trace::parse_str(content);
         let inlined_call_edges = gather_inlined_call_edges(&trace);
-        cluster_inlined_call_children(&mut trace, &inlined_call_edges);
+        cluster_inlined_call_children(
+            &mut trace,
+            &inlined_call_edges,
+            InliningTransform::Clustered,
+        );
         let expected = "
 CT: strbuf_vaddf at strbuf.c:390:0
 ICF: strbuf_vaddf at strbuf.c:394:7
@@ -301,6 +355,92 @@ ICF: strbuf_vaddf at strbuf.c:395:3
   IRF: strbuf_grow at strbuf.c:0:0
   ICT: strbuf_grow at strbuf.c:91:0
   IRF: strbuf_grow at strbuf.c:0:0"
+            .trim();
+
+        assert_eq!(format!("{}", trace).trim(), expected);
+
+        // Should be the same after renumbering as well
+        trace.renumber();
+        assert_eq!(format!("{}", trace).trim(), expected);
+    }
+
+    #[test]
+    fn inlined_call_children_deduplicated() {
+        // Inlining transform optionally supports deduplicating inlined call edges such that
+        // there's only one entry for each inlined call edge no matter how often it may appear.
+        // This test covers that core functionality, and also checks behaviour of nested
+        // out-of-line calls which the contain another level inlined calls.
+        let content = "
+CT: strbuf_vaddf at strbuf.c:390:0
+ICF: strbuf_vaddf at strbuf.c:394:7
+  ICT: strbuf_avail at strbuf.h:139:0
+  IRF: strbuf_avail at strbuf.h:0:0
+ICF: strbuf_vaddf at strbuf.c:395:3
+  ICT: strbuf_grow at strbuf.c:91:0
+  IRF: strbuf_grow at strbuf.c:0:0
+ICF: strbuf_vaddf at strbuf.c:394:7
+  ICT: strbuf_avail at strbuf.h:139:0
+  IRF: strbuf_avail at strbuf.h:0:0
+ICF: strbuf_vaddf at strbuf.c:395:3
+  ICT: strbuf_grow at strbuf.c:91:0
+  CF: strbuf_grow at strbuf.c:99:2
+    CT: xrealloc at wrapper.c:127:0
+    ICF: xrealloc at wrapper.c:135:2
+      ICT: memory_limit_check at wrapper.c:17:0
+      IRF: memory_limit_check at wrapper.c:0:0
+    ICF: xrealloc at wrapper.c:135:2
+      ICT: memory_limit_check at wrapper.c:17:0
+      IRF: memory_limit_check at wrapper.c:0:0
+    RF: xrealloc at wrapper.c:140:1
+  IRF: strbuf_grow at strbuf.c:0:0
+ICF: strbuf_vaddf at strbuf.c:394:7
+  ICT: strbuf_avail at strbuf.h:139:0
+  IRF: strbuf_avail at strbuf.h:0:0
+ICF: strbuf_vaddf at strbuf.c:395:3
+  ICT: strbuf_grow at strbuf.c:91:0
+  CF: strbuf_grow at strbuf.c:99:2
+    CT: xrealloc at wrapper.c:127:0
+    RF: xrealloc at wrapper.c:140:1
+  IRF: strbuf_grow at strbuf.c:0:0
+ICF: strbuf_vaddf at strbuf.c:401:12
+  ICT: strbuf_avail at strbuf.h:139:0
+  IRF: strbuf_avail at strbuf.h:0:0
+ICF: strbuf_vaddf at strbuf.c:407:2
+  ICT: strbuf_setlen at strbuf.h:160:0
+  IRF: strbuf_setlen at strbuf.h:0:0
+RF: strbuf_vaddf at strbuf.c:408:1"
+            .trim();
+        let mut trace = Trace::parse_str(content);
+        let inlined_call_edges = gather_inlined_call_edges(&trace);
+        cluster_inlined_call_children(
+            &mut trace,
+            &inlined_call_edges,
+            InliningTransform::Deduplicated,
+        );
+        let expected = "
+CT: strbuf_vaddf at strbuf.c:390:0
+ICF: strbuf_vaddf at strbuf.c:394:7
+  ICT: strbuf_avail at strbuf.h:139:0
+  IRF: strbuf_avail at strbuf.h:0:0
+ICF: strbuf_vaddf at strbuf.c:395:3
+  ICT: strbuf_grow at strbuf.c:91:0
+  CF: strbuf_grow at strbuf.c:99:2
+    CT: xrealloc at wrapper.c:127:0
+    ICF: xrealloc at wrapper.c:135:2
+      ICT: memory_limit_check at wrapper.c:17:0
+      IRF: memory_limit_check at wrapper.c:0:0
+    RF: xrealloc at wrapper.c:140:1
+  CF: strbuf_grow at strbuf.c:99:2
+    CT: xrealloc at wrapper.c:127:0
+    RF: xrealloc at wrapper.c:140:1
+  IRF: strbuf_grow at strbuf.c:0:0
+ICF: strbuf_vaddf at strbuf.c:401:12
+  ICT: strbuf_avail at strbuf.h:139:0
+  IRF: strbuf_avail at strbuf.h:0:0
+ICF: strbuf_vaddf at strbuf.c:407:2
+  ICT: strbuf_setlen at strbuf.h:160:0
+  IRF: strbuf_setlen at strbuf.h:0:0
+RF: strbuf_vaddf at strbuf.c:408:1"
             .trim();
 
         // println!("Result:\n\n{}", format!("{}", trace).trim());
