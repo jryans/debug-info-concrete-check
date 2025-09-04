@@ -390,6 +390,7 @@ fn compact_diff_ops(grouped_diff_ops: &mut Vec<Vec<DiffOp>>) {
 pub struct TreeDiff<'content> {
     pub before_trace: Trace<'content>,
     pub after_trace: Trace<'content>,
+    pub matching: BiHashMap<TreeNodeIndex, TreeNodeIndex>,
     pub edit_ops: Vec<TreeEditOp>,
     pub grouped_diff_ops: Vec<Vec<DiffOp>>,
 }
@@ -1143,6 +1144,7 @@ pub fn diff_tree<'content>(
     TreeDiff {
         before_trace: before_unmodified,
         after_trace: after,
+        matching,
         edit_ops,
         grouped_diff_ops,
     }

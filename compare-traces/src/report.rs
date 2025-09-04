@@ -1409,6 +1409,7 @@ mod tests {
         let diff = Diff::new(
             Trace::parse_lines(Vec::from(["CF: getnanotime at trace.c:397:18"])),
             Trace::parse_lines(Vec::from(["CF: getnanotime at trace.c:0:0"])),
+            None,
             Vec::from([Vec::from([DiffOp::Replace {
                 old_index: 0,
                 old_len: 1,
@@ -1440,6 +1441,7 @@ mod tests {
             Trace::parse_lines(Vec::from([
                 "CT: xstrdup_or_null at git-compat-util.h:1169:9",
             ])),
+            None,
             Vec::from([Vec::from([DiffOp::Replace {
                 old_index: 0,
                 old_len: 1,
@@ -1475,6 +1477,7 @@ mod tests {
                 "  CT: Jump to external code for _vsnprintf",
                 "  RF: Jump to external code for _vsnprintf",
             ])),
+            None,
             Vec::from([Vec::from([DiffOp::Replace {
                 old_index: 1,
                 old_len: 2,
@@ -1501,6 +1504,7 @@ mod tests {
                 "  RF: Jump to external code",
             ])),
             Trace::parse_lines(Vec::from([])),
+            None,
             Vec::from([Vec::from([DiffOp::Delete {
                 old_index: 0,
                 old_len: 3,
@@ -1529,6 +1533,7 @@ mod tests {
                 "  RF: Jump to external code",
             ])),
             Trace::parse_lines(Vec::from([])),
+            None,
             Vec::from([Vec::from([DiffOp::Delete {
                 old_index: 0,
                 old_len: 6,
@@ -1555,6 +1560,7 @@ mod tests {
                 "  RF: git_has_dos_drive_prefix at git-compat-util.h:433:2",
             ])),
             Trace::parse_lines(Vec::from([])),
+            None,
             Vec::from([Vec::from([DiffOp::Delete {
                 old_index: 0,
                 old_len: 3,
@@ -1586,6 +1592,7 @@ mod tests {
                 "  RF: init_repository_format at setup.c:713:1",
             ])),
             Trace::parse_lines(Vec::from([])),
+            None,
             Vec::from([Vec::from([DiffOp::Delete {
                 old_index: 0,
                 old_len: 9,
@@ -1612,6 +1619,7 @@ mod tests {
                 "  RF: git_has_dos_drive_prefix at git-compat-util.h:433:2",
             ])),
             Trace::parse_lines(Vec::from([])),
+            None,
             Vec::from([Vec::from([DiffOp::Delete {
                 old_index: 0,
                 old_len: 4,
@@ -1698,6 +1706,7 @@ mod tests {
                 "CF: index_mem at object-file.c:0:0",
                 "  CT: die at usage.c:172:0",
             ])),
+            None,
             Vec::from([
                 Vec::from([DiffOp::Replace {
                     old_index: 1,
