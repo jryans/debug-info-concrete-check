@@ -803,6 +803,7 @@ fn check_for_inlined_noise_added(
 fn check_for_inlined_return_added(
     diff: &Diff<'_>,
     grouped_indexed_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<IndexedEvent>)>)],
+    ignored_before_event_indices: &mut HashSet<usize>,
     ignored_after_event_indices: &mut HashSet<usize>,
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
@@ -858,17 +859,17 @@ fn check_for_inlined_return_added(
         }
 
         // Extract related events
-        let related_before_events = vec![];
+        let mut related_before_events = vec![];
         let mut related_after_events = vec![];
         related_after_events.push(indexed_events.pop_front().unwrap().event);
 
         // Find other after events potentially affected by this.
         // Any siblings after the return's parent are considered affected.
-        // TODO: Also find and remove the related before lines
         let inlined_return_grandparent_node =
             inlined_return_parent_node.parent(after_tree).unwrap();
+        let inlined_return_parent_index = &inlined_return_parent_node.index;
         let inlined_return_parent_position = inlined_return_grandparent_node
-            .child_position(&inlined_return_parent_node.index)
+            .child_position(inlined_return_parent_index)
             .unwrap();
         let inlined_return_parent_sibling_indices = inlined_return_grandparent_node
             .children
@@ -882,6 +883,50 @@ fn check_for_inlined_return_added(
                     related_after_events.push(event);
                     // Mark events as ignored in case they may be part of a later confused block
                     ignored_after_event_indices.insert(sibling_subtree_node.index.unwrap());
+                }
+            }
+        }
+
+        // If we didn't find any further after events,
+        // we can skip looking for before events,
+        // as we only take a matching count of them.
+        if related_after_events.len() == 1 {
+            divergences.push(Divergence::new(
+                DivergenceType::InlinedReturnAdded,
+                related_before_events,
+                related_after_events,
+                diff_op,
+            ));
+            continue;
+        }
+
+        // Find related before lines (if possible)
+        if let Some(matching) = &diff.matching {
+            if let Some(inlined_return_parent_before_index) =
+                matching.get_by_right(inlined_return_parent_index)
+            {
+                let before_tree = &diff.before_trace.tree;
+                let inlined_return_parent_before_node =
+                    &before_tree[inlined_return_parent_before_index];
+                // We can't find our position with the before parent's children
+                // accurately, since the inlined return itself won't be in the bimap.
+                // Including the entire before parent subtree grabs too much.
+                // Our best effort approach for now is to take a matching number of events
+                // from the end of the before parent's subtree.
+                let before_matching_nodes: Vec<_> = inlined_return_parent_before_node
+                    .dfs_pre_order(before_tree)
+                    .collect();
+                for parent_subtree_node in before_matching_nodes
+                    .iter()
+                    .rev()
+                    .take(related_after_events.len() - 1)
+                    .rev()
+                {
+                    // Add events to this divergence
+                    let event = parent_subtree_node.data(&diff.before_trace.events).clone();
+                    related_before_events.push(event);
+                    // Mark events as ignored in case they may be part of a later confused block
+                    ignored_before_event_indices.insert(parent_subtree_node.index.unwrap());
                 }
             }
         }
@@ -900,6 +945,7 @@ fn check_for_inlined_return_added(
 fn check_for_known_divergences(
     diff: &Diff<'_>,
     grouped_indexed_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<IndexedEvent>)>)],
+    ignored_before_event_indices: &mut HashSet<usize>,
     ignored_after_event_indices: &mut HashSet<usize>,
 ) -> Vec<Divergence> {
     let mut divergences = vec![];
@@ -916,10 +962,10 @@ fn check_for_known_divergences(
             if diff_op.tag() == DiffTag::Equal {
                 continue;
             }
-            // Examine after-only diffs for now.
-            // Checking replacements without also ignoring before events leads to
-            // many uncategorised blocks.
-            if diff_op.tag() != DiffTag::Insert {
+            // Examine one-sided diffs only.
+            // Replacements are typically coordinate changes,
+            // and we'd like to preserve these as-is.
+            if diff_op.tag() == DiffTag::Replace {
                 continue;
             }
             let events_present = change_tuples_indexed_events
@@ -928,11 +974,16 @@ fn check_for_known_divergences(
             if !events_present {
                 continue;
             }
-            for (_, indexed_events) in change_tuples_indexed_events {
+            for (change_tag, indexed_events) in change_tuples_indexed_events {
+                let ignored_indices = match change_tag {
+                    ChangeTag::Delete => &mut *ignored_before_event_indices,
+                    ChangeTag::Insert => &mut *ignored_after_event_indices,
+                    ChangeTag::Equal => unreachable!(),
+                };
                 let mut i: usize = 0;
                 // Double-check end condition each iteration, as we may remove events
                 while i < indexed_events.len() {
-                    if ignored_after_event_indices.contains(&indexed_events[i].index) {
+                    if ignored_indices.contains(&indexed_events[i].index) {
                         indexed_events.remove(i);
                         continue;
                     }
@@ -1009,6 +1060,7 @@ fn check_for_known_divergences(
             let mut divergences_found = check_for_inlined_return_added(
                 diff,
                 grouped_indexed_events,
+                ignored_before_event_indices,
                 ignored_after_event_indices,
             );
             if !divergences_found.is_empty() {
@@ -1197,6 +1249,7 @@ impl DivergenceAnalysis {
     }
 
     pub fn analyse_diff(&mut self, diff: &Diff<'_>) {
+        let mut ignored_before_event_indices: HashSet<usize> = HashSet::new();
         let mut ignored_after_event_indices: HashSet<usize> = HashSet::new();
 
         for op_group in &diff.grouped_diff_ops {
@@ -1213,6 +1266,7 @@ impl DivergenceAnalysis {
             let mut new_divergences = check_for_known_divergences(
                 diff,
                 &mut grouped_indexed_events,
+                &mut ignored_before_event_indices,
                 &mut ignored_after_event_indices,
             );
             for divergence in &mut new_divergences {
@@ -1378,11 +1432,14 @@ impl DivergenceAnalysis {
 
 #[cfg(test)]
 mod tests {
+    use bimap::BiHashMap;
+
     use crate::trace::Trace;
 
     use super::*;
 
     fn collect_divergences(diff: &Diff<'_>) -> Vec<Divergence> {
+        let mut ignored_before_event_indices: HashSet<usize> = HashSet::new();
         let mut ignored_after_event_indices: HashSet<usize> = HashSet::new();
         let mut divergences: Vec<Divergence> = Vec::new();
         for op_group in &diff.grouped_diff_ops {
@@ -1390,6 +1447,7 @@ mod tests {
             let mut new_divergences = check_for_known_divergences(
                 &diff,
                 &mut grouped_indexed_events,
+                &mut ignored_before_event_indices,
                 &mut ignored_after_event_indices,
             );
             divergences.append(&mut new_divergences);
@@ -1645,7 +1703,6 @@ mod tests {
         // Along with checking for an inlined return added divergence,
         // this test also ensures the surrounding lines affected by that
         // divergence do not end up as uncategorised.
-        // TODO: Also find and remove the related before lines
 
         // Example diff:
         // <  CT: check_commit at object-file.c:2328:0
@@ -1706,7 +1763,12 @@ mod tests {
                 "CF: index_mem at object-file.c:0:0",
                 "  CT: die at usage.c:172:0",
             ])),
-            None,
+            Some(BiHashMap::from_iter([
+                // JRS: Not the complete matching bimap,
+                // just enough for the pattern to succeed.
+                (TreeNodeIndex::Node(0), TreeNodeIndex::Node(0)),
+                (TreeNodeIndex::Node(1), TreeNodeIndex::Node(1)),
+            ])),
             Vec::from([
                 Vec::from([DiffOp::Replace {
                     old_index: 1,
@@ -1753,7 +1815,7 @@ mod tests {
         );
         let divergences = collect_divergences(&diff);
         // println!("{:#?}", divergences);
-        assert_eq!(divergences.len(), 4);
+        assert_eq!(divergences.len(), 2);
         assert_eq!(
             divergences[0].divergence_type,
             DivergenceType::CoordinatesChangedSmall
@@ -1764,6 +1826,7 @@ mod tests {
             DivergenceType::InlinedReturnAdded
         );
         assert_eq!(divergences[1].new_index, 6);
+        assert_eq!(divergences[1].before_events.len(), 8);
         assert_eq!(divergences[1].after_events.len(), 9);
     }
 }
