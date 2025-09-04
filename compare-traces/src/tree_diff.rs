@@ -1101,6 +1101,16 @@ pub fn diff_tree<'content>(
         }
     }
 
+    // For the returned matching bimap, filter to nodes that exist in both original trees
+    // (removing those added to the before tree while diffing)
+    let before_unmodified_len = before_unmodified.tree.nodes.len();
+    let before_len = before.tree.nodes.len();
+    assert!(before_len >= before_unmodified_len);
+    for i in before_unmodified_len..before_len {
+        let before_index = TreeNodeIndex::Node(i);
+        matching.remove_by_left(&before_index);
+    }
+
     // JRS: We used to apply the delete ops to the before tree here,
     // but this complicates counting the size of before sub-trees.
     // Since we don't actually need to keep editing the before tree
