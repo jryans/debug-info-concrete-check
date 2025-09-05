@@ -1254,19 +1254,21 @@ fn collect_grouped_indexed_events(
 }
 
 pub struct DivergenceAnalysis {
-    remarks_by_location: Option<HashMap<Location, Remark>>,
     divergence_stats_by_coordinates: BTreeMap<Divergence, u64>,
 }
 
 impl DivergenceAnalysis {
-    pub fn new(remarks_by_location: Option<HashMap<Location, Remark>>) -> DivergenceAnalysis {
+    pub fn new() -> DivergenceAnalysis {
         DivergenceAnalysis {
-            remarks_by_location,
             divergence_stats_by_coordinates: BTreeMap::new(),
         }
     }
 
-    pub fn analyse_diff(&mut self, diff: &Diff<'_>) {
+    pub fn analyse_diff(
+        &mut self,
+        remarks_by_location: Option<&HashMap<Location, Remark>>,
+        diff: &Diff<'_>,
+    ) {
         let mut ignored_before_event_indices: HashSet<usize> = HashSet::new();
         let mut ignored_after_event_indices: HashSet<usize> = HashSet::new();
 
@@ -1295,7 +1297,7 @@ impl DivergenceAnalysis {
                 }
 
                 // Look for optimisation remarks at divergence coordinates
-                if let Some(remarks) = &self.remarks_by_location {
+                if let Some(remarks) = remarks_by_location {
                     // TODO: Enable for other types where possible
                     if divergence.divergence_type == DivergenceType::ProgramCallRemoved {
                         if let Some(remark) = remarks.get(divergence.location()) {
@@ -1415,6 +1417,16 @@ impl DivergenceAnalysis {
         out.flush()?;
 
         Ok(())
+    }
+
+    pub fn into_merged(merged: &mut Self, current: Self) {
+        let merged_divergence_stats = &mut merged.divergence_stats_by_coordinates;
+        for (divergence, occurrences) in current.divergence_stats_by_coordinates {
+            merged_divergence_stats
+                .entry(divergence)
+                .and_modify(|merged_occurrences| *merged_occurrences += occurrences)
+                .or_insert(occurrences);
+        }
     }
 
     pub fn print_countable_events_by_type(&self, events_by_type_dir: &PathBuf) -> Result<()> {

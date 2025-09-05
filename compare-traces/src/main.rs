@@ -9,6 +9,7 @@ use clap::{Parser, ValueEnum};
 use diff::Diff;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::log_enabled;
+use rayon::prelude::*;
 use similar::TextDiff;
 use tree_diff::diff_tree;
 use walkdir::WalkDir;
@@ -126,11 +127,6 @@ fn main() -> Result<()> {
         remarks_by_location = Some(load_remarks(&remarks_file)?);
     }
 
-    let mut divergence_analysis: Option<DivergenceAnalysis> = None;
-    if !cli.no_report {
-        divergence_analysis = Some(DivergenceAnalysis::new(remarks_by_location));
-    }
-
     let progress = ProgressBar::new(before_files.len().try_into().unwrap());
     progress.set_style(
         ProgressStyle::with_template(
@@ -139,119 +135,154 @@ fn main() -> Result<()> {
         .unwrap(),
     );
 
-    for i in 0..before_files.len() {
-        let before_file = &before_files[i];
-        let after_file = &after_files[i];
+    // Collect separate analyses per file pair in parallel
+    let separate_analyses: Vec<_> = (0..before_files.len())
+        .into_par_iter()
+        .map(|i| {
+            let mut divergence_analysis: Option<DivergenceAnalysis> = None;
+            if !cli.no_report {
+                divergence_analysis = Some(DivergenceAnalysis::new());
+            }
 
-        let before_content = fs::read_to_string(before_file)
-            .with_context(|| format!("Unable to read before trace ({})", before_file.display()))?;
-        let after_content = fs::read_to_string(after_file)
-            .with_context(|| format!("Unable to read after trace ({})", after_file.display()))?;
+            let before_file = &before_files[i];
+            let after_file = &after_files[i];
 
-        if before_content.is_empty() && after_content.is_empty() {
-            continue;
-        }
+            let before_content = fs::read_to_string(before_file).with_context(|| {
+                format!("Unable to read before trace ({})", before_file.display())
+            })?;
+            let after_content = fs::read_to_string(after_file).with_context(|| {
+                format!("Unable to read after trace ({})", after_file.display())
+            })?;
 
-        let mut diff: Diff = match cli.diff_strategy {
-            DiffStrategy::Text => Diff::from(
-                TextDiff::configure()
-                    .algorithm(similar::Algorithm::Patience)
-                    .timeout(Duration::from_secs(10 * 60))
-                    .diff_lines(&before_content, &after_content),
-            ),
-            DiffStrategy::Tree => {
-                let mut before = Trace::parse_str(&before_content);
-                let mut after = Trace::parse_str(&after_content);
+            if before_content.is_empty() && after_content.is_empty() {
+                return Ok(None);
+            }
 
-                let transform = cli.inlining_transform;
-                preprocess_inlining(&mut before, &mut after, transform);
+            let mut diff: Diff = match cli.diff_strategy {
+                DiffStrategy::Text => Diff::from(
+                    TextDiff::configure()
+                        .algorithm(similar::Algorithm::Patience)
+                        .timeout(Duration::from_secs(10 * 60))
+                        .diff_lines(&before_content, &after_content),
+                ),
+                DiffStrategy::Tree => {
+                    let mut before = Trace::parse_str(&before_content);
+                    let mut after = Trace::parse_str(&after_content);
 
-                // Compacting adjacent events depends on their indices reflecting
-                // lines they'd have in printed trace, so re-numbering is required
-                // for multi-line patterns to match after the inlining transform.
-                // In addition, it makes the verbose trace easier to understand
-                // (at least when also saving the inlined transforms).
-                before.renumber();
-                after.renumber();
+                    let transform = cli.inlining_transform;
+                    preprocess_inlining(&mut before, &mut after, transform);
 
-                if cli.save_after_inlining_transform {
-                    assert!(cli.before_file_or_dir.is_dir());
-                    assert!(cli.after_file_or_dir.is_dir());
-                    let mut before_file_inlining_dir = before_file.parent().unwrap().to_path_buf();
-                    before_file_inlining_dir.set_file_name(format!(
-                        "{}-inlining-{}",
-                        before_file_inlining_dir
-                            .file_name()
-                            .unwrap()
-                            .to_str()
-                            .unwrap()
-                            .to_string(),
-                        transform.to_file_name(),
-                    ));
-                    fs::create_dir_all(&before_file_inlining_dir)?;
-                    let before_file_inlining_path =
-                        before_file_inlining_dir.join(before_file.file_name().unwrap());
-                    let mut before_file_inlining =
-                        BufWriter::new(File::create(before_file_inlining_path)?);
-                    write!(&mut before_file_inlining, "{}", before)?;
-                    before_file_inlining.flush()?;
-                    let mut after_file_inlining_dir = after_file.parent().unwrap().to_path_buf();
-                    after_file_inlining_dir.set_file_name(format!(
-                        "{}-inlining-{}",
-                        after_file_inlining_dir
-                            .file_name()
-                            .unwrap()
-                            .to_str()
-                            .unwrap()
-                            .to_string(),
-                        transform.to_file_name(),
-                    ));
-                    fs::create_dir_all(&after_file_inlining_dir)?;
-                    let after_file_inlining_path =
-                        after_file_inlining_dir.join(after_file.file_name().unwrap());
-                    let mut after_file_inlining =
-                        BufWriter::new(File::create(after_file_inlining_path)?);
-                    write!(&mut after_file_inlining, "{}", after)?;
-                    after_file_inlining.flush()?;
+                    // Compacting adjacent events depends on their indices reflecting
+                    // lines they'd have in printed trace, so re-numbering is required
+                    // for multi-line patterns to match after the inlining transform.
+                    // In addition, it makes the verbose trace easier to understand
+                    // (at least when also saving the inlined transforms).
+                    before.renumber();
+                    after.renumber();
+
+                    if cli.save_after_inlining_transform {
+                        assert!(cli.before_file_or_dir.is_dir());
+                        assert!(cli.after_file_or_dir.is_dir());
+                        let mut before_file_inlining_dir =
+                            before_file.parent().unwrap().to_path_buf();
+                        before_file_inlining_dir.set_file_name(format!(
+                            "{}-inlining-{}",
+                            before_file_inlining_dir
+                                .file_name()
+                                .unwrap()
+                                .to_str()
+                                .unwrap()
+                                .to_string(),
+                            transform.to_file_name(),
+                        ));
+                        fs::create_dir_all(&before_file_inlining_dir)?;
+                        let before_file_inlining_path =
+                            before_file_inlining_dir.join(before_file.file_name().unwrap());
+                        let mut before_file_inlining =
+                            BufWriter::new(File::create(before_file_inlining_path)?);
+                        write!(&mut before_file_inlining, "{}", before)?;
+                        before_file_inlining.flush()?;
+                        let mut after_file_inlining_dir =
+                            after_file.parent().unwrap().to_path_buf();
+                        after_file_inlining_dir.set_file_name(format!(
+                            "{}-inlining-{}",
+                            after_file_inlining_dir
+                                .file_name()
+                                .unwrap()
+                                .to_str()
+                                .unwrap()
+                                .to_string(),
+                            transform.to_file_name(),
+                        ));
+                        fs::create_dir_all(&after_file_inlining_dir)?;
+                        let after_file_inlining_path =
+                            after_file_inlining_dir.join(after_file.file_name().unwrap());
+                        let mut after_file_inlining =
+                            BufWriter::new(File::create(after_file_inlining_path)?);
+                        write!(&mut after_file_inlining, "{}", after)?;
+                        after_file_inlining.flush()?;
+                    }
+
+                    Diff::from(diff_tree(before, after))
                 }
+            };
 
-                Diff::from(diff_tree(before, after))
+            diff.before_file_path = Some(before_file.clone());
+            diff.after_file_path = Some(after_file.clone());
+
+            if cli.diff {
+                if log_enabled!(log::Level::Debug) {
+                    println!("{:#?}", &diff);
+                    println!();
+                }
+                print_diff(&diff);
             }
-        };
 
-        diff.before_file_path = Some(before_file.clone());
-        diff.after_file_path = Some(after_file.clone());
-
-        if cli.diff {
-            if log_enabled!(log::Level::Debug) {
-                println!("{:#?}", &diff);
-                println!();
+            if let Some(divergence_analysis) = &mut divergence_analysis {
+                divergence_analysis.analyse_diff(remarks_by_location.as_ref(), &diff);
             }
-            print_diff(&diff);
-        }
 
-        if let Some(divergence_analysis) = &mut divergence_analysis {
-            divergence_analysis.analyse_diff(&diff);
-        }
+            progress.inc(1);
 
-        progress.inc(1);
-    }
+            return Ok(divergence_analysis);
+        })
+        .map(|r| r.unwrap())
+        .collect();
 
     progress.finish();
 
-    if let Some(divergence_analysis) = divergence_analysis {
-        divergence_analysis.print_report()?;
-
-        if let Some(events_by_type_dir) = &cli.events_by_type_dir {
-            if !events_by_type_dir.is_dir() {
-                return Err(anyhow!(
-                    "Events by type path `{}` is not a directory",
-                    events_by_type_dir.display(),
-                ));
-            }
-            divergence_analysis.print_countable_events_by_type(&events_by_type_dir)?;
-        }
+    if separate_analyses.iter().all(|analysis| analysis.is_none()) {
+        return Ok(());
     }
+
+    progress.reset();
+
+    // Merge separate analyses together sequentially (for deterministic output)
+    let merged_analysis =
+        separate_analyses
+            .into_iter()
+            .fold(DivergenceAnalysis::new(), |mut merged, analysis| {
+                if let Some(analysis) = analysis {
+                    DivergenceAnalysis::into_merged(&mut merged, analysis);
+                }
+                progress.inc(1);
+                merged
+            });
+
+    // Print merged results
+    merged_analysis.print_report()?;
+
+    if let Some(events_by_type_dir) = &cli.events_by_type_dir {
+        if !events_by_type_dir.is_dir() {
+            return Err(anyhow!(
+                "Events by type path `{}` is not a directory",
+                events_by_type_dir.display(),
+            ));
+        }
+        merged_analysis.print_countable_events_by_type(&events_by_type_dir)?;
+    }
+
+    progress.finish();
 
     Ok(())
 }
