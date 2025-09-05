@@ -890,7 +890,8 @@ fn check_for_inlined_return_added(
         // If we didn't find any further after events,
         // we can skip looking for before events,
         // as we only take a matching count of them.
-        if related_after_events.len() == 1 {
+        let extra_after_events = related_after_events.len() - 1;
+        if extra_after_events == 0 {
             divergences.push(Divergence::new(
                 DivergenceType::InlinedReturnAdded,
                 related_before_events,
@@ -919,7 +920,7 @@ fn check_for_inlined_return_added(
                 for parent_subtree_node in before_matching_nodes
                     .iter()
                     .rev()
-                    .take(related_after_events.len() - 1)
+                    .take(extra_after_events)
                     .rev()
                 {
                     // Add events to this divergence
@@ -928,6 +929,23 @@ fn check_for_inlined_return_added(
                     // Mark events as ignored in case they may be part of a later confused block
                     ignored_before_event_indices.insert(parent_subtree_node.index.unwrap());
                 }
+            }
+        }
+
+        // As a special case, check if we're matching the last lines of the trace
+        // (which seems to happen from time to time for this issue).
+        // If so, grab the same before lines.
+        if related_before_events.is_empty()
+            && related_after_events.last() == diff.after_trace.events.last()
+        {
+            let before_len = diff.before_trace.events.len();
+            let before_start = before_len - extra_after_events;
+            for i in before_start..before_len {
+                // Add events to this divergence
+                let event = diff.before_trace.events[i].clone();
+                related_before_events.push(event);
+                // Mark events as ignored in case they may be part of a later confused block
+                ignored_before_event_indices.insert(i);
             }
         }
 
