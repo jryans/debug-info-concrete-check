@@ -205,8 +205,6 @@ void getInlinedChain(const QBDI::rword &address,
 
 DWARFDie getCallSiteEntry(const DWARFDie &entry, const QBDI::rword &address,
                           const uint32_t &instSize) {
-  if (!entry.hasChildren())
-    return DWARFDie();
   for (const auto &callSite : entry.children()) {
     const auto tag = callSite.getTag();
     // Clang uses `DW_TAG_call_site` (DWARF 5) even when emitting DWARF 4
