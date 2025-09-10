@@ -239,8 +239,8 @@ void getInlinedChain(const QBDI::rword &address,
   addressToChainCache[address] = inlinedChain;
 }
 
-DWARFDie getCallSiteEntry(const DWARFDie &entry, const QBDI::rword &address,
-                          const uint32_t &instSize) {
+DWARFDie findCallSiteEntry(const DWARFDie &entry, const QBDI::rword &address,
+                           const uint32_t &instSize) {
   for (const auto &callSite : entry.children()) {
     const auto tag = callSite.getTag();
     // Clang uses `DW_TAG_call_site` (DWARF 5) even when emitting DWARF 4
@@ -267,9 +267,29 @@ DWARFDie getCallSiteEntry(const DWARFDie &entry, const QBDI::rword &address,
       parent = parent.getParent();
     }
     assert(parent.isValid());
-    return getCallSiteEntry(parent, address, instSize);
+    return findCallSiteEntry(parent, address, instSize);
   }
   return DWARFDie();
+}
+
+DWARFDie getCallSiteEntry(const DWARFDie &entry, const QBDI::rword &address,
+                          const uint32_t &instSize) {
+  // Cache call site entry after first lookup
+  static std::map<QBDI::rword, DWARFDie> addressToCallSiteCache;
+
+  // Check cache from previous lookups
+  if (const auto callSiteLookup = addressToCallSiteCache.find(address);
+      callSiteLookup != addressToCallSiteCache.end()) {
+    return callSiteLookup->second;
+  }
+
+  // Not found in cache
+  const DWARFDie callSite = findCallSiteEntry(entry, address, instSize);
+
+  // Add to cache to speed up future lookups
+  addressToCallSiteCache[address] = callSite;
+
+  return callSite;
 }
 
 bool isAddressInCurrentModule(QBDI::rword address) {
