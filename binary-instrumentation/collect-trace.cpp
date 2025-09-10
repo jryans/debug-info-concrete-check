@@ -624,7 +624,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
 
   // Look for function name and line info related to this address
   // JRS: Remove this and use only the inlined chain...?
-  DILineInfo lineInfo;
+  std::optional<DILineInfo> lineInfo = std::nullopt;
   if (verbose || stackDepthMayChange) {
     lineInfo = getLineInfo(address);
   }
@@ -816,7 +816,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
         // Will have access to the _next_ instruction's inlined chain when run,
         // which is checked by `isFunctionPrintable` to filter internal function
         // events if needed
-        printEventFromLineInfo(lineInfo, EventType::CallFrom,
+        printEventFromLineInfo(*lineInfo, EventType::CallFrom,
                                EventSource::Stack, address, vm, depth);
       };
     } else {
@@ -824,14 +824,14 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       // to workaround GCC which may associate return with inlined scope
       popInlinedStackFrames(vm);
       // Print immediately
-      printEventFromLineInfo(lineInfo, EventType::ReturnFrom,
+      printEventFromLineInfo(*lineInfo, EventType::ReturnFrom,
                              EventSource::Stack, address, vm);
     }
   }
 
   // In verbose mode, log current instruction, but only if other blocks will not
   if (verbose && !stackDepthMayChange) {
-    printEventFromLineInfo(lineInfo, EventType::Verbose, EventSource::Verbose,
+    printEventFromLineInfo(*lineInfo, EventType::Verbose, EventSource::Verbose,
                            address, vm);
   }
 
