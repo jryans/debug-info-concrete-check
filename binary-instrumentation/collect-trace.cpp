@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -191,7 +192,18 @@ void printStackDepth(raw_ostream &stream, const std::optional<size_t> &depth) {
 }
 
 void getInlinedChain(const QBDI::rword &address,
-                     SmallVectorImpl<DWARFDie> &inlinedChain) {
+                     SmallVector<DWARFDie, 4> &inlinedChain) {
+  // Cache inlined chain after first lookup
+  static std::map<QBDI::rword, SmallVector<DWARFDie, 4>> addressToChainCache;
+
+  // Check cache from previous lookups
+  if (const auto chainLookup = addressToChainCache.find(address);
+      chainLookup != addressToChainCache.end()) {
+    inlinedChain = chainLookup->second;
+    return;
+  }
+
+  // Not found in cache
   DWARFCompileUnit *compileUnit =
       dwarfCtx->getCompileUnitForCodeAddress(address);
   if (!compileUnit)
@@ -201,6 +213,9 @@ void getInlinedChain(const QBDI::rword &address,
   // Reverse chain so that order matches stack vector
   // Newest frames are now at the end of the vector
   std::reverse(inlinedChain.begin(), inlinedChain.end());
+
+  // Add to cache to speed up future lookups
+  addressToChainCache[address] = inlinedChain;
 }
 
 DWARFDie getCallSiteEntry(const DWARFDie &entry, const QBDI::rword &address,
