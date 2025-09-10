@@ -392,6 +392,7 @@ void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
                             const std::optional<bool> &tailCallWithoutInfo) {
   if (!isFunctionPrintable())
     return;
+  bool flushRequired = false;
   // Write event text to string first, as code paths below may skip printing
   std::string eventStr;
   raw_string_ostream eventStream(eventStr);
@@ -425,8 +426,12 @@ void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
       eventStream << "Jump to external code";
       const std::optional<StringRef> symbolName =
           findDynamicFunctionName(*address);
-      if (symbolName)
+      if (symbolName) {
         eventStream << " for " << symbolName;
+        // Need to flush around `fork` calls
+        if (symbolName->equals("fork"))
+          flushRequired = true;
+      }
     } else if (address && !isAddressInCurrentModule(*address)) {
       // Skip "CT: External code" events, adds diff noise
       return;
@@ -438,6 +443,10 @@ void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
     eventStream << " (TCWI)";
   eventStream << "\n";
   *trace << eventStream.str();
+  // Only flush when required for trace consistency,
+  // as this greatly improves performance
+  if (flushRequired)
+    trace->flush();
 }
 
 void printCallFromEventForInlinedEntry(const DWARFDie &entry) {
