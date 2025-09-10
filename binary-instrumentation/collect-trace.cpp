@@ -382,9 +382,6 @@ void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
     eventStream << " (TCWI)";
   eventStream << "\n";
   *trace << eventStream.str();
-  // Flush after each event to avoid trace corruption due to context switching
-  // caused by threads, signals, etc.
-  trace->flush();
 }
 
 void printCallFromEventForInlinedEntry(const DWARFDie &entry) {
