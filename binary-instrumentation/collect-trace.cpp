@@ -191,6 +191,27 @@ void printStackDepth(raw_ostream &stream, const std::optional<size_t> &depth) {
     stream << "  ";
 }
 
+DILineInfo getLineInfo(const QBDI::rword &address) {
+  // Cache line info after first lookup
+  static std::map<QBDI::rword, DILineInfo> addressToLineCache;
+
+  // Check cache from previous lookups
+  if (const auto lineInfoLookup = addressToLineCache.find(address);
+      lineInfoLookup != addressToLineCache.end()) {
+    return lineInfoLookup->second;
+  }
+
+  // Not found in cache
+  const auto lineInfo = dwarfCtx->getLineInfoForAddress(
+      {address}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
+                  DILineInfoSpecifier::FunctionNameKind::ShortName});
+
+  // Add to cache to speed up future lookups
+  addressToLineCache[address] = lineInfo;
+
+  return lineInfo;
+}
+
 void getInlinedChain(const QBDI::rword &address,
                      SmallVector<DWARFDie, 4> &inlinedChain) {
   // Cache inlined chain after first lookup
@@ -462,10 +483,7 @@ void printReturnFromEventForInlinedEntry(const DWARFDie &entry) {
 }
 
 void printReturnFromEventForInlinedAddress(const QBDI::rword &address) {
-  DILineInfo lineInfo = dwarfCtx->getLineInfoForAddress(
-      {address}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
-                  DILineInfoSpecifier::FunctionNameKind::ShortName});
-
+  const DILineInfo lineInfo = getLineInfo(address);
   printEventFromLineInfo(lineInfo, EventType::ReturnFrom,
                          EventSource::InlinedChain, address);
 }
@@ -608,9 +626,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
   // JRS: Remove this and use only the inlined chain...?
   DILineInfo lineInfo;
   if (verbose || stackDepthMayChange) {
-    lineInfo = dwarfCtx->getLineInfoForAddress(
-        {address}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
-                    DILineInfoSpecifier::FunctionNameKind::ShortName});
+    lineInfo = getLineInfo(address);
   }
 
   // If we're jumping to external code, we may have queued events
@@ -942,9 +958,7 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
   if (stackDepthChanged) {
     // Look for function name and line info related to this address
     // JRS: Remove this and use only the inlined chain...?
-    const auto nextLineInfo = dwarfCtx->getLineInfoForAddress(
-        {nextAddress}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
-                        DILineInfoSpecifier::FunctionNameKind::ShortName});
+    const DILineInfo nextLineInfo = getLineInfo(nextAddress);
     const size_t depth = stack.size();
     // Queue for (potential) future printing based on next instruction
     queuedCallToEvent = [=]() {
@@ -1162,9 +1176,7 @@ int qbdipreload_on_run(QBDI::VMInstanceRef vm, QBDI::rword start,
   pushStackFrame(inlinedChain.back(), EventSource::Stack);
 
   // Log initial instruction
-  const auto lineInfo = dwarfCtx->getLineInfoForAddress(
-      {mainFunc}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
-                   DILineInfoSpecifier::FunctionNameKind::ShortName});
+  const DILineInfo lineInfo = getLineInfo(mainFunc);
   printEventFromLineInfo(lineInfo, EventType::CallTo, EventSource::Stack,
                          mainFunc);
   stackDepthChanged = false;
