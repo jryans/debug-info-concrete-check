@@ -57,6 +57,8 @@ bool printReturnFromLocation = true;
 bool includeExternalLibrary = true;
 bool includeInternalFunction = true;
 
+bool printProcessMemoryMaps = false;
+
 pid_t pid;
 pid_t ppid;
 std::optional<SmallString<128>> traceDir;
@@ -1135,6 +1137,8 @@ int qbdipreload_on_main(int argc, char **argv) {
   if (std::getenv("CON_TRACE_INTERNAL_FUNCTION") &&
       !std::strcmp(std::getenv("CON_TRACE_INTERNAL_FUNCTION"), "0"))
     includeInternalFunction = false;
+  if (std::getenv("CON_TRACE_PRINT_PROCESS_MEMORY_MAPS"))
+    printProcessMemoryMaps = true;
 
   // errs() << "argc: " << argc << "\n";
   // for (size_t i = 0; i < argc; ++i)
@@ -1169,6 +1173,21 @@ int qbdipreload_on_run(QBDI::VMInstanceRef vm, QBDI::rword start,
   // Save current module memory maps to check for moves into external code
   const auto processMemoryMaps = QBDI::getCurrentProcessMaps();
   std::string currentModuleName;
+  if (printProcessMemoryMaps) {
+    for (const auto &mm : processMemoryMaps) {
+      errs() << "[" << format_hex(mm.range.start(), 18) << ", "
+             << format_hex(mm.range.end(), 18) << "): ";
+      if (!mm.name.empty())
+        errs() << mm.name << " ";
+      if (mm.permission & QBDI::PF_READ)
+        errs() << "r";
+      if (mm.permission & QBDI::PF_WRITE)
+        errs() << "w";
+      if (mm.permission & QBDI::PF_EXEC)
+        errs() << "x";
+      errs() << "\n";
+    }
+  }
   for (const auto &mm : processMemoryMaps) {
     if (!mm.range.contains(mainFunc))
       continue;
