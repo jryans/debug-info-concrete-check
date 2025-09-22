@@ -108,11 +108,15 @@ impl Event {
         let mut line = None;
         let mut column = None;
         if rest.contains(" at ") {
-            // Example: getnanotime at trace.c:397:18
             // Function and file should always be present, but line and column may not be
-            let mut segments = rest.split_ascii_whitespace();
+            // Example: getnanotime at trace.c:397:18
+            // Example: operator<<char, std::char_traits<char>, std::allocator<char> > at basic_string.h:3832:0
+            let mut segments = rest.split(" at ");
             function = segments.next().map(|s| s.to_owned());
-            let mut components = segments.nth(1).unwrap().split(':');
+            // Coordinates might be followed by notes, ignore these if present
+            // Example: insert at simulator/cenum.cc:66:0 (TCWI)
+            let mut components_with_notes = segments.next().unwrap().split_ascii_whitespace();
+            let mut components = components_with_notes.next().unwrap().split(':');
             file = components.next().map(|s| s.to_owned());
             line = components.next().map(|s| s.parse::<u64>().unwrap());
             column = components.next().map(|s| s.parse::<u64>().unwrap());
