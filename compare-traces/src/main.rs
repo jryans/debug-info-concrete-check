@@ -134,6 +134,7 @@ fn main() -> Result<()> {
         )
         .unwrap(),
     );
+    progress.force_draw();
 
     // Collect separate analyses per file pair in parallel
     let separate_analyses: Vec<_> = (0..before_files.len())
