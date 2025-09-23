@@ -335,7 +335,7 @@ fn edit_tree(tree: &mut Tree, edit: &TreeEditOp) {
     }
 }
 
-fn compact_diff_ops(grouped_diff_ops: &mut Vec<Vec<DiffOp>>) {
+fn compact_diff_ops(mut grouped_diff_ops: Vec<Vec<DiffOp>>) -> Vec<Vec<DiffOp>> {
     for i in 0..(grouped_diff_ops.len() - 1) {
         // Double check end condition, as we may remove items during compaction
         if i > grouped_diff_ops.len() - 2 {
@@ -350,7 +350,7 @@ fn compact_diff_ops(grouped_diff_ops: &mut Vec<Vec<DiffOp>>) {
             continue;
         }
         // Compaction supports groups with a single op only
-        if current_op_group.len() > 1 {
+        if current_op_group.len() != 1 {
             continue;
         }
         let current_op = current_op_group[0];
@@ -381,9 +381,13 @@ fn compact_diff_ops(grouped_diff_ops: &mut Vec<Vec<DiffOp>>) {
             DiffTag::Equal => unreachable!(),
         };
         grouped_diff_ops[i] = vec![compacted_op];
-        // TODO: Use a different data structure to make this more efficient...?
-        grouped_diff_ops.remove(i + 1);
+        // Defer removal to separate pass below to avoid O(n^2) shifts
+        grouped_diff_ops[i + 1] = vec![];
     }
+    grouped_diff_ops
+        .into_iter()
+        .filter(|diff_op_group| !diff_op_group.is_empty())
+        .collect()
 }
 
 #[derive(Debug)]
@@ -1149,7 +1153,7 @@ pub fn diff_tree<'content>(
         let op = &diff_op_group[0];
         op.old_range().start.max(op.new_range().start)
     });
-    compact_diff_ops(&mut grouped_diff_ops);
+    grouped_diff_ops = compact_diff_ops(grouped_diff_ops);
 
     TreeDiff {
         before_trace: before_unmodified,
