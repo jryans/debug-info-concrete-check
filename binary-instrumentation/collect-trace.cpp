@@ -715,7 +715,9 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       *trace << "New chain: " << newChainSize << "\n";
     }
 
-    assert(!stack.empty());
+    // Stack should generally not be empty here,
+    // unless we're processing the very first instruction
+    assert(!stack.empty() || address == mainFunc);
     // Align inlined chain by finding the oldest chain link in the stack
     // TODO: Limit search by only looking as far back as old chain size
     const auto &oldestChainLink = inlinedChain[0];
@@ -807,8 +809,9 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
         // For the case of an out-of-line call target
         // that immediately enters an inlining region,
         // the first new frame will be a regular subprogram,
-        // and we should have already printed it
-        assert(printedQueuedCallFromEvent);
+        // and we should have already printed it,
+        // unless we're processing the very first instruction
+        assert(printedQueuedCallFromEvent || address == mainFunc);
         // Clear that state now, as it's only valid for the first frame
         printedQueuedCallFromEvent = false;
       } else {
@@ -1218,20 +1221,13 @@ int qbdipreload_on_run(QBDI::VMInstanceRef vm, QBDI::rword start,
   vm->addCodeCB(QBDI::PREINST, beforeInstruction, nullptr);
   vm->addCodeCB(QBDI::POSTINST, afterInstruction, nullptr);
 
-  // Initialise stack with frame for `main`
+  // Check that debug info seems to be preset
   getInlinedChain(mainFunc, inlinedChain);
   if (inlinedChain.empty()) {
     errs() << "Error: No debug info for `main` (" << format_hex(mainFunc, 18)
            << ")\n";
     return QBDIPRELOAD_ERR_STARTUP_FAILED;
   }
-  pushStackFrame(inlinedChain.back(), EventSource::Stack);
-
-  // Log initial instruction
-  const DILineInfo lineInfo = getLineInfo(mainFunc);
-  printEventFromLineInfo(lineInfo, EventType::CallTo, EventSource::Stack,
-                         mainFunc);
-  stackDepthChanged = false;
 
   vm->run(start, stop);
 
