@@ -895,7 +895,11 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
   if (currInstIsCall || currInstIsBranch) {
     // Check whether we moved to external code
     nextInstInCurrentModule = isAddressInCurrentModule(nextAddress);
-    if (!nextInstInCurrentModule) {
+    if (nextInstInCurrentModule) {
+      // Clear return target if we're staying in the current module.
+      // Without this, we can end up double-returning in recursive code.
+      prevCallReturnTarget = 0;
+    } else {
       if (verbose) {
         *trace << "Inst. moved to external code: "
                << format_hex(gprState->rip, 18) << "\n";
