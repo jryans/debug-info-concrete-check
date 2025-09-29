@@ -406,7 +406,7 @@ void printEventFromLineInfo(const DILineInfo &lineInfo, const EventType &type,
   eventStream << ": ";
   if (lineInfo) {
     eventStream << lineInfo.FunctionName;
-    if (address && verbose) {
+    if (verbose && address && lineInfo.StartAddress) {
       const auto functionOffset = (uint64_t)std::abs(
           (int64_t)*address - (int64_t)*lineInfo.StartAddress);
       if (*address < *lineInfo.StartAddress)
