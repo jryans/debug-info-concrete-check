@@ -112,6 +112,12 @@ void printQueue() {
   }
 }
 
+std::string getEntryName(const DWARFDie &entry) {
+  if (entry)
+    return entry.getName(DINameKind::LinkageName);
+  return "<unknown>";
+}
+
 struct StackFrame {
   StackFrame(DWARFDie entry, bool isInlined)
       : entry(entry), isInlined(isInlined) {}
@@ -136,11 +142,7 @@ struct StackFrame {
   // The first address we encountered when calling into this frame.
   QBDI::rword callToAddress;
 
-  std::string getName() {
-    if (entry)
-      return entry.getShortName();
-    return "<unknown>";
-  }
+  std::string getName() { return getEntryName(entry); }
 };
 
 // Newest frames are at the end of the stack vector
@@ -206,7 +208,7 @@ DILineInfo getLineInfo(const QBDI::rword &address) {
   // Not found in cache
   const auto lineInfo = dwarfCtx->getLineInfoForAddress(
       {address}, {DILineInfoSpecifier::FileLineInfoKind::RawValue,
-                  DILineInfoSpecifier::FunctionNameKind::ShortName});
+                  DILineInfoSpecifier::FunctionNameKind::LinkageName});
 
   // Add to cache to speed up future lookups
   addressToLineCache[address] = lineInfo;
@@ -462,7 +464,7 @@ void printCallFromEventForInlinedEntry(const DWARFDie &entry) {
     parent = parent.getParent();
   }
   assert(parent.isValid());
-  lineInfo.FunctionName = parent.getShortName();
+  lineInfo.FunctionName = getEntryName(parent);
 
   // Extracted from `DWARFContext::getInliningInfoForAddress`
   uint32_t callFile = 0, callLine = 0, callColumn = 0, callDisc = 0;
@@ -483,7 +485,7 @@ void printCallFromEventForInlinedEntry(const DWARFDie &entry) {
 
 DILineInfo getCallToLineInfoForEntry(const DWARFDie &entry) {
   DILineInfo lineInfo;
-  lineInfo.FunctionName = entry.getShortName();
+  lineInfo.FunctionName = getEntryName(entry);
 
   // Use decl. file and line from abstract origin entry when inlined
   lineInfo.FileName =
@@ -507,7 +509,7 @@ void printReturnFromEventForInlinedEntry(const DWARFDie &entry) {
   assert(entry.getTag() == dwarf::Tag::DW_TAG_inlined_subroutine);
 
   DILineInfo lineInfo;
-  lineInfo.FunctionName = entry.getShortName();
+  lineInfo.FunctionName = getEntryName(entry);
 
   // Use decl. file from abstract origin entry when inlined
   lineInfo.FileName =
@@ -569,9 +571,7 @@ void popStackFrame(const QBDI::VMInstanceRef &vm) {
     bool frameIsBranchToExternal = false;
     DILineInfo lineInfo;
     if (entry.isValid()) {
-      lineInfo.FunctionName = entry.getShortName();
-      lineInfo.FileName =
-          entry.getDeclFile(DILineInfoSpecifier::FileLineInfoKind::RawValue);
+      lineInfo.FunctionName = getEntryName(entry);
       // Source coordinates not generally available when leaving these
       // artificial frames
       lineInfo.Line = 0;
@@ -704,7 +704,7 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
   if (verbose) {
     *trace << "Inlined chain:\n";
     for (size_t i = inlinedChain.size(); i--;) {
-      *trace << "inlinedChain[" << i << "]: " << inlinedChain[i].getShortName()
+      *trace << "inlinedChain[" << i << "]: " << getEntryName(inlinedChain[i])
              << "\n";
     }
   }
@@ -731,13 +731,13 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
     const auto &oldestChainLink = inlinedChain[0];
     if (verbose) {
       *trace << "Aligning inlined chain\n";
-      *trace << "Oldest chain link: " << oldestChainLink.getShortName() << "\n";
+      *trace << "Oldest chain link: " << getEntryName(oldestChainLink) << "\n";
     }
     size_t stackIdxOldestChainLink = stack.size();
     for (size_t i = stack.size(); i--;) {
       const auto &entry = stack[i].entry;
       if (verbose)
-        *trace << "stack[" << i << "]: " << entry.getShortName() << "\n";
+        *trace << "stack[" << i << "]: " << getEntryName(entry) << "\n";
       // Skip artificial frames, inlined chain may align with their callers
       if (stack[i].isArtificial) {
         if (verbose)
@@ -768,10 +768,10 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       const auto &entry = stack[stackIdxOldestChainLink + i].entry;
       if (verbose) {
         *trace << "stack[" << stackIdxOldestChainLink + i << "]: ";
-        *trace << entry.getShortName() << "\n";
+        *trace << getEntryName(entry) << "\n";
         *trace << "inlinedChain[" << i << "]: ";
         if (i < newChainSize)
-          *trace << inlinedChain[i].getShortName() << "\n";
+          *trace << getEntryName(inlinedChain[i]) << "\n";
         else
           *trace << "past end of chain\n";
       }
