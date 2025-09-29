@@ -481,7 +481,7 @@ void printCallFromEventForInlinedEntry(const DWARFDie &entry) {
                          EventSource::InlinedChain);
 }
 
-void printCallToEventForEntry(const DWARFDie &entry) {
+DILineInfo getCallToLineInfoForEntry(const DWARFDie &entry) {
   DILineInfo lineInfo;
   lineInfo.FunctionName = entry.getShortName();
 
@@ -491,6 +491,14 @@ void printCallToEventForEntry(const DWARFDie &entry) {
   lineInfo.Line = entry.getDeclLine();
   lineInfo.Column = 0;
 
+  return lineInfo;
+}
+
+void printCallToEventForInlinedEntry(const DWARFDie &entry) {
+  // JRS: Feels like we _should_ be able to assert this,
+  // but it fails currently. Further investigation needed.
+  // assert(entry.getTag() == dwarf::Tag::DW_TAG_inlined_subroutine);
+  DILineInfo lineInfo = getCallToLineInfoForEntry(entry);
   printEventFromLineInfo(lineInfo, EventType::CallTo,
                          EventSource::InlinedChain);
 }
@@ -824,7 +832,9 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
         printCallFromEventForInlinedEntry(entry);
       }
       pushStackFrame(entry, EventSource::InlinedChain);
-      printCallToEventForEntry(entry);
+      // JRS: Prints as if inlined, even though that's not always true
+      // because of some case with subroutine DIEs ending up here
+      printCallToEventForInlinedEntry(entry);
     }
 
     // Store chain to check for changes with next instruction
@@ -977,8 +987,7 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
     if (!inlinedChain.empty()) {
       // Only push here for normal stack movements.
       // Multiple frames of inlined chain changes are handled separately.
-      if (inlinedChain.size() == 1)
-        pushStackFrame(inlinedChain.back(), EventSource::Stack);
+      pushStackFrame(inlinedChain.front(), EventSource::Stack);
     } else {
       pushStackFrame(DWARFDie(), EventSource::Stack);
     }
@@ -1001,8 +1010,16 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
   // Log next instruction after stack depth changed
   if (stackDepthChanged) {
     // Look for function name and line info related to this address
-    // JRS: Remove this and use only the inlined chain...?
-    const DILineInfo nextLineInfo = getLineInfo(nextAddress);
+    DILineInfo nextLineInfo;
+    // If there are no inlined frames at the next address, we can use the more
+    // precise line table info for this call to. If there is inlining, we
+    // fallback to the entry's decl. line.
+    if (inlinedChain.size() == 1) {
+      nextLineInfo = getLineInfo(nextAddress);
+    } else {
+      if (stack.back().entry)
+        nextLineInfo = getCallToLineInfoForEntry(stack.back().entry);
+    }
     const size_t depth = stack.size();
     // Queue for (potential) future printing based on next instruction
     queuedCallToEvent = [=]() {
