@@ -730,6 +730,12 @@ QBDI::VMAction beforeInstruction(QBDI::VMInstanceRef vm,
       const auto &entry = stack[i].entry;
       if (verbose)
         *trace << "stack[" << i << "]: " << entry.getShortName() << "\n";
+      // Skip artificial frames, inlined chain may align with their callers
+      if (stack[i].isArtificial) {
+        if (verbose)
+          *trace << "stack[" << i << "]: artificial, skipping\n";
+        continue;
+      }
       if (entry != oldestChainLink)
         continue;
       stackIdxOldestChainLink = i;
