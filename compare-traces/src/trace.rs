@@ -21,12 +21,26 @@ pub struct Trace<'content> {
 }
 
 impl<'content> Trace<'content> {
-    pub fn parse_str(content: &str) -> Trace {
-        let lines: Vec<_> = content.lines().collect();
-        Self::parse_lines(lines)
+    pub fn parse_str(content: &'content str) -> Trace {
+        Self::parse_str_with_context(content, None)
     }
 
-    pub fn parse_lines(lines: Vec<&str>) -> Trace {
+    pub fn parse_str_with_context(
+        content: &'content str,
+        context: Option<&str>,
+    ) -> Trace<'content> {
+        let lines: Vec<_> = content.lines().collect();
+        Self::parse_lines_with_context(lines, context)
+    }
+
+    pub fn parse_lines(lines: Vec<&'content str>) -> Trace {
+        Self::parse_lines_with_context(lines, None)
+    }
+
+    pub fn parse_lines_with_context(
+        lines: Vec<&'content str>,
+        context: Option<&str>,
+    ) -> Trace<'content> {
         let mut parse_errors = vec![];
         let mut events: Vec<_> = lines
             .iter()
@@ -34,7 +48,11 @@ impl<'content> Trace<'content> {
             .filter_map(|r| r.map_err(|e| parse_errors.push(e)).ok())
             .collect();
         for error in parse_errors {
-            eprintln!("{}", error);
+            if let Some(context) = context {
+                eprintln!("{} ({})", error, context);
+            } else {
+                eprintln!("{}", error);
+            }
         }
 
         // Attach partner events

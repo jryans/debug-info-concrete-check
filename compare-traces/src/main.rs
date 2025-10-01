@@ -167,8 +167,10 @@ fn main() -> Result<()> {
                         .diff_lines(&before_content, &after_content),
                 ),
                 DiffStrategy::Tree => {
-                    let mut before = Trace::parse_str(&before_content);
-                    let mut after = Trace::parse_str(&after_content);
+                    let mut before =
+                        Trace::parse_str_with_context(&before_content, before_file.to_str());
+                    let mut after =
+                        Trace::parse_str_with_context(&after_content, after_file.to_str());
 
                     let transform = cli.inlining_transform;
                     preprocess_inlining(&mut before, &mut after, transform);
