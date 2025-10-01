@@ -79,7 +79,7 @@ impl Event {
         // Parse event type after advancing 2 Unicode characters
         let event_type_indices = rest.char_indices().nth(2);
         if event_type_indices.is_none() {
-            return Err(anyhow!("Corrupt event: `{}`", event_str.trim()));
+            return Err(anyhow!("Event without type: `{}`", event_str.trim()));
         }
         let (event_type_end, _) = event_type_indices.unwrap();
         let event_type_str = &rest[..event_type_end];
@@ -122,7 +122,7 @@ impl Event {
             let mut components_with_notes = segments.next().unwrap().split_ascii_whitespace();
             let components_opt = components_with_notes.next();
             if components_opt.is_none() {
-                return Err(anyhow!("Corrupt event: `{}`", event_str.trim()));
+                return Err(anyhow!("Missing coord. components: `{}`", event_str.trim()));
             }
             let mut components = components_opt.unwrap().split(':');
             file = components.next().map(|s| s.to_owned());
