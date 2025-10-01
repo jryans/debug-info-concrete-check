@@ -30,7 +30,11 @@ fn event_to_call_edge(event: &Event) -> Option<CallEdge> {
     if from_location.line.unwrap() == 0 {
         return None;
     }
-    assert!(call_from_event.partner.is_some());
+    // TODO: Sort out call to events for syscalls, then convert this back to assertion
+    if call_from_event.partner.is_none() {
+        // eprintln!("Missing partner: {}", call_from_event);
+        return None;
+    }
     let partner_event = call_from_event.partner.as_ref().unwrap();
     assert!(partner_event.event_type == EventType::CallTo);
     let call_to_event = partner_event;
