@@ -27,10 +27,15 @@ impl<'content> Trace<'content> {
     }
 
     pub fn parse_lines(lines: Vec<&str>) -> Trace {
+        let mut parse_errors = vec![];
         let mut events: Vec<_> = lines
             .iter()
-            .map(|line| Event::parse(line).unwrap())
+            .map(|line| Event::parse(line))
+            .filter_map(|r| r.map_err(|e| parse_errors.push(e)).ok())
             .collect();
+        for error in parse_errors {
+            eprintln!("{}", error);
+        }
 
         // Attach partner events
         if !events.is_empty() {
