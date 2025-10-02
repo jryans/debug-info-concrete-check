@@ -156,6 +156,7 @@ fn main() -> Result<()> {
             })?;
 
             if before_content.is_empty() && after_content.is_empty() {
+                progress.inc(1);
                 return Ok(None);
             }
 
