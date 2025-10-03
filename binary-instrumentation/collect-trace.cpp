@@ -943,9 +943,8 @@ QBDI::VMAction afterInstruction(QBDI::VMInstanceRef vm,
   bool tailCallWithoutInfo = false;
   // If the currently analysed instruction is a branch and moved to
   // different function, treat this as a tail call.
-  // TODO: Consider how to safely detect this with inlining enabled
-  if (currInstIsBranch && !currInstIsTailCall && prevInlinedChain.size() == 1 &&
-      inlinedChain.size() == 1 && prevInlinedChain != inlinedChain) {
+  if (currInstIsBranch && !currInstIsTailCall && !prevInlinedChain.empty() &&
+      !inlinedChain.empty() && prevInlinedChain[0] != inlinedChain[0]) {
     if (verbose)
       *trace << "Branch changed functions, assuming tail call without info\n";
     tailCallWithoutInfo = true;
