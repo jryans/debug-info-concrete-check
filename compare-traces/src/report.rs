@@ -19,6 +19,7 @@ use crate::tree::TreeNodeIndex;
 
 #[derive(Sequence, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 enum DivergenceType {
+    TailCallWithoutInfo,
     CoordinatesRemoved,
     CoordinatesChangedSmall,
     CoordinatesChangedLarge,
@@ -37,6 +38,7 @@ enum DivergenceType {
 impl DivergenceType {
     fn to_type_name(&self) -> &str {
         match self {
+            DivergenceType::TailCallWithoutInfo => "Tail call without info",
             DivergenceType::CoordinatesRemoved => "Coordinates removed",
             DivergenceType::CoordinatesChangedSmall => "Coordinates changed (small)",
             DivergenceType::CoordinatesChangedLarge => "Coordinates changed (large)",
@@ -54,6 +56,7 @@ impl DivergenceType {
 
     fn to_file_name(&self) -> &str {
         match self {
+            DivergenceType::TailCallWithoutInfo => "tail-call-without-info",
             DivergenceType::CoordinatesRemoved => "coordinates-removed",
             DivergenceType::CoordinatesChangedSmall => "coordinates-changed-small",
             DivergenceType::CoordinatesChangedLarge => "coordinates-changed-large",
@@ -155,6 +158,67 @@ impl Ord for Divergence {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.key().cmp(&other.key())
     }
+}
+
+// Example diff:
+// < CT: xstrdup_or_null at git-compat-util.h:1168:0
+// > CT: xstrdup_or_null at git-compat-util.h:1168:0 (TCWI)
+fn check_for_tail_call_without_info(
+    grouped_indexed_events: &mut [(DiffOp, Vec<(ChangeTag, VecDeque<IndexedEvent>)>)],
+) -> Vec<Divergence> {
+    let mut divergences = vec![];
+
+    for (diff_op, change_tuples_indexed_events) in grouped_indexed_events {
+        // Diff op for this region should be replace
+        if diff_op.tag() != DiffTag::Replace {
+            continue;
+        }
+
+        // Should have two tuples with deleted and inserted lines
+        assert!(change_tuples_indexed_events.len() == 2);
+        let (befores, afters) = change_tuples_indexed_events.split_at_mut(1);
+        let (before_change_tag, before_indexed_events) = &mut befores[0];
+        let (after_change_tag, after_indexed_events) = &mut afters[0];
+        assert!(*before_change_tag == ChangeTag::Delete);
+        assert!(*after_change_tag == ChangeTag::Insert);
+
+        // Must have at least one event on both sides
+        if before_indexed_events.len() < 1 || after_indexed_events.len() < 1 {
+            continue;
+        }
+
+        // Function and file must match
+        let before_event = &before_indexed_events[0].event;
+        let after_event = &after_indexed_events[0].event;
+        if before_event.location.function != after_event.location.function {
+            continue;
+        }
+        if before_event.location.file != after_event.location.file {
+            continue;
+        }
+
+        // Only one side mentions tail call without info
+        const TCWI: &str = "(TCWI)";
+        if before_event.detail.ends_with(TCWI) == after_event.detail.ends_with(TCWI) {
+            continue;
+        }
+
+        // Extract related events
+        let mut related_before_events = vec![];
+        let mut related_after_events = vec![];
+
+        related_before_events.push(before_indexed_events.pop_front().unwrap().event);
+        related_after_events.push(after_indexed_events.pop_front().unwrap().event);
+
+        divergences.push(Divergence::new(
+            DivergenceType::TailCallWithoutInfo,
+            related_before_events,
+            related_after_events,
+            diff_op,
+        ));
+    }
+
+    divergences
 }
 
 // Example diff:
@@ -1011,6 +1075,13 @@ fn check_for_known_divergences(
         }
 
         // Check each pattern
+        {
+            let mut divergences_found = check_for_tail_call_without_info(grouped_indexed_events);
+            if !divergences_found.is_empty() {
+                divergences.append(&mut divergences_found);
+                continue;
+            }
+        }
         {
             let mut divergences_found = check_for_coordinates_removed(grouped_indexed_events);
             if !divergences_found.is_empty() {
