@@ -8,7 +8,7 @@ use regex::Regex;
 /// Computes 1-based depth of a single line.
 /// Assumes 2 space indentation is used.
 // JRS: This should probably move to the `Trace` module
-fn line_depth(line: &str) -> usize {
+pub fn line_depth(line: &str) -> usize {
     static INDENT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^ *").unwrap());
     INDENT_RE.captures(line).map_or(0, |c| c[0].len() / 2) + 1
 }

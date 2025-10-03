@@ -1497,8 +1497,8 @@ CF: D at file.tex
     CF: Sg at file.tex"
             .trim();
         let diff = diff_tree(
-            Trace::parse_str(before_content),
-            Trace::parse_str(after_content),
+            Trace::parse_str(before_content).unwrap(),
+            Trace::parse_str(after_content).unwrap(),
         );
         assert_eq!(
             diff.edit_ops,
@@ -1556,8 +1556,8 @@ CF: all_attrs_init at attr.c:155:3
   RF: hashmap_iter_next at hashmap.c:308:1"
             .trim();
         let diff = diff_tree(
-            Trace::parse_str(before_content),
-            Trace::parse_str(after_content),
+            Trace::parse_str(before_content).unwrap(),
+            Trace::parse_str(after_content).unwrap(),
         );
         assert_eq!(
             diff.edit_ops,
@@ -1606,8 +1606,8 @@ CF: system_path at exec-cmd.c:268:27
   RF: system_prefix at exec-cmd.c:248:2"
             .trim();
         let diff = diff_tree(
-            Trace::parse_str(before_content),
-            Trace::parse_str(after_content),
+            Trace::parse_str(before_content).unwrap(),
+            Trace::parse_str(after_content).unwrap(),
         );
         assert_eq!(
             diff.edit_ops,
@@ -1638,8 +1638,8 @@ CF: strbuf_vaddf at strbuf.c:397:8
   RF: Jump to external code for _vsnprintf"
             .trim();
         let diff = diff_tree(
-            Trace::parse_str(before_content),
-            Trace::parse_str(after_content),
+            Trace::parse_str(before_content).unwrap(),
+            Trace::parse_str(after_content).unwrap(),
         );
         assert_eq!(
             diff.edit_ops,
@@ -1686,8 +1686,8 @@ CF: main at ffmpeg.c:4521:5
   RF: init_dynload at cmdutils.c:84:1"
             .trim();
         let diff = diff_tree(
-            Trace::parse_str(before_content),
-            Trace::parse_str(after_content),
+            Trace::parse_str(before_content).unwrap(),
+            Trace::parse_str(after_content).unwrap(),
         );
         assert_eq!(
             diff.edit_ops,
@@ -1733,8 +1733,8 @@ ICF: error_builtin at usage.c:81:11
   IRF: _ at gettext.h:0:0"
             .trim();
         let diff = diff_tree(
-            Trace::parse_str(before_content),
-            Trace::parse_str(after_content),
+            Trace::parse_str(before_content).unwrap(),
+            Trace::parse_str(after_content).unwrap(),
         );
         assert_eq!(
             diff.edit_ops,

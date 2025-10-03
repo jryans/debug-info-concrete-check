@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::fmt::Display;
 
 use crate::event::Event;
-use crate::tree::{Tree, TreeNodeIndex};
+use crate::tree::{line_depth, Tree, TreeNodeIndex};
+
+use anyhow::{anyhow, Result};
 
 /// Applies 2 space indentation using 1-based depth.
 // JRS: The matching `line_depth` function should probably be moved here as well
@@ -21,38 +23,48 @@ pub struct Trace<'content> {
 }
 
 impl<'content> Trace<'content> {
-    pub fn parse_str(content: &'content str) -> Trace {
+    pub fn parse_str(content: &'content str) -> Result<Trace> {
         Self::parse_str_with_context(content, None)
     }
 
     pub fn parse_str_with_context(
         content: &'content str,
         context: Option<&str>,
-    ) -> Trace<'content> {
+    ) -> Result<Trace<'content>> {
         let lines: Vec<_> = content.lines().collect();
         Self::parse_lines_with_context(lines, context)
     }
 
-    pub fn parse_lines(lines: Vec<&'content str>) -> Trace {
+    pub fn parse_lines(lines: Vec<&'content str>) -> Result<Trace> {
         Self::parse_lines_with_context(lines, None)
     }
 
     pub fn parse_lines_with_context(
         lines: Vec<&'content str>,
         context: Option<&str>,
-    ) -> Trace<'content> {
+    ) -> Result<Trace<'content>> {
+        if lines.is_empty() {
+            return Ok(Trace {
+                lines,
+                events: Vec::new(),
+                tree: Tree::new(),
+            });
+        }
+        if line_depth(lines[0]) != 1 {
+            return Err(anyhow!("Trace doesn't start with root ({:?})", context));
+        }
+
         let mut parse_errors = vec![];
         let mut events: Vec<_> = lines
             .iter()
             .map(|line| Event::parse(line))
             .filter_map(|r| r.map_err(|e| parse_errors.push(e)).ok())
             .collect();
-        for error in parse_errors {
-            if let Some(context) = context {
-                eprintln!("{} ({})", error, context);
-            } else {
-                eprintln!("{}", error);
-            }
+        for error in &parse_errors {
+            eprintln!("{}", error);
+        }
+        if !parse_errors.is_empty() {
+            return Err(anyhow!("Some events failed to parse ({:?})", context));
         }
 
         // Attach partner events
@@ -68,11 +80,11 @@ impl<'content> Trace<'content> {
         // Convert lines into trees
         let tree = Tree::from_indented_items(&lines);
 
-        Trace {
+        Ok(Trace {
             lines,
             events,
             tree,
-        }
+        })
     }
 
     pub fn renumber(&mut self) {
@@ -176,6 +188,9 @@ ICF: strbuf_vaddf at strbuf.c:395:3
       RF: Jump to external code for realloc
     RF: xrealloc at wrapper.c:140:1"
             .trim();
-        assert_eq!(format!("{}", Trace::parse_str(content)).trim(), content);
+        assert_eq!(
+            format!("{}", Trace::parse_str(content).unwrap()).trim(),
+            content
+        );
     }
 }

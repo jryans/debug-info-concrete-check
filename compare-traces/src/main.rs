@@ -173,9 +173,9 @@ fn main() -> Result<()> {
                 ),
                 DiffStrategy::Tree => {
                     let mut before =
-                        Trace::parse_str_with_context(&before_content, before_file.to_str());
+                        Trace::parse_str_with_context(&before_content, before_file.to_str())?;
                     let mut after =
-                        Trace::parse_str_with_context(&after_content, after_file.to_str());
+                        Trace::parse_str_with_context(&after_content, after_file.to_str())?;
 
                     if cli.parse_only {
                         progress.inc(1);

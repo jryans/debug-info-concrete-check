@@ -1566,8 +1566,8 @@ mod tests {
     #[test]
     fn coordinates_removed() {
         let diff = Diff::new(
-            Trace::parse_lines(Vec::from(["CF: getnanotime at trace.c:397:18"])),
-            Trace::parse_lines(Vec::from(["CF: getnanotime at trace.c:0:0"])),
+            Trace::parse_lines(Vec::from(["CF: getnanotime at trace.c:397:18"])).unwrap(),
+            Trace::parse_lines(Vec::from(["CF: getnanotime at trace.c:0:0"])).unwrap(),
             None,
             Vec::from([Vec::from([DiffOp::Replace {
                 old_index: 0,
@@ -1596,10 +1596,12 @@ mod tests {
         let diff = Diff::new(
             Trace::parse_lines(Vec::from([
                 "CT: xstrdup_or_null at git-compat-util.h:1168:0",
-            ])),
+            ]))
+            .unwrap(),
             Trace::parse_lines(Vec::from([
                 "CT: xstrdup_or_null at git-compat-util.h:1169:9",
-            ])),
+            ]))
+            .unwrap(),
             None,
             Vec::from([Vec::from([DiffOp::Replace {
                 old_index: 0,
@@ -1630,12 +1632,14 @@ mod tests {
                 "CF: strbuf_vaddf at strbuf.c:397:8",
                 "  CT: Jump to external code for ___vsnprintf_chk",
                 "  RF: Jump to external code for ___vsnprintf_chk",
-            ])),
+            ]))
+            .unwrap(),
             Trace::parse_lines(Vec::from([
                 "CF: strbuf_vaddf at strbuf.c:397:8",
                 "  CT: Jump to external code for _vsnprintf",
                 "  RF: Jump to external code for _vsnprintf",
-            ])),
+            ]))
+            .unwrap(),
             None,
             Vec::from([Vec::from([DiffOp::Replace {
                 old_index: 1,
@@ -1661,8 +1665,9 @@ mod tests {
                 "CF: strbuf_init at strbuf.c:57:2",
                 "  CT: Jump to external code",
                 "  RF: Jump to external code",
-            ])),
-            Trace::parse_lines(Vec::from([])),
+            ]))
+            .unwrap(),
+            Trace::parse_lines(Vec::from([])).unwrap(),
             None,
             Vec::from([Vec::from([DiffOp::Delete {
                 old_index: 0,
@@ -1690,8 +1695,9 @@ mod tests {
                 "CF: init_repository_format at setup.c:712:2",
                 "  CT: Jump to external code",
                 "  RF: Jump to external code",
-            ])),
-            Trace::parse_lines(Vec::from([])),
+            ]))
+            .unwrap(),
+            Trace::parse_lines(Vec::from([])).unwrap(),
             None,
             Vec::from([Vec::from([DiffOp::Delete {
                 old_index: 0,
@@ -1717,8 +1723,9 @@ mod tests {
                 "CF: is_absolute_path at cache.h:1276:32",
                 "  CT: git_has_dos_drive_prefix at git-compat-util.h:432:0",
                 "  RF: git_has_dos_drive_prefix at git-compat-util.h:433:2",
-            ])),
-            Trace::parse_lines(Vec::from([])),
+            ]))
+            .unwrap(),
+            Trace::parse_lines(Vec::from([])).unwrap(),
             None,
             Vec::from([Vec::from([DiffOp::Delete {
                 old_index: 0,
@@ -1749,8 +1756,9 @@ mod tests {
                 "    CT: Jump to external code for memcpy",
                 "    RF: Jump to external code for memcpy",
                 "  RF: init_repository_format at setup.c:713:1",
-            ])),
-            Trace::parse_lines(Vec::from([])),
+            ]))
+            .unwrap(),
+            Trace::parse_lines(Vec::from([])).unwrap(),
             None,
             Vec::from([Vec::from([DiffOp::Delete {
                 old_index: 0,
@@ -1776,8 +1784,9 @@ mod tests {
                 "CF: is_absolute_path at cache.h:1276:32",
                 "  CT: git_has_dos_drive_prefix at git-compat-util.h:432:0",
                 "  RF: git_has_dos_drive_prefix at git-compat-util.h:433:2",
-            ])),
-            Trace::parse_lines(Vec::from([])),
+            ]))
+            .unwrap(),
+            Trace::parse_lines(Vec::from([])).unwrap(),
             None,
             Vec::from([Vec::from([DiffOp::Delete {
                 old_index: 0,
@@ -1847,7 +1856,8 @@ mod tests {
                 "    RF: _ at gettext.h:49:1",
                 "  CF: check_commit at object-file.c:2332:3",
                 "    CT: die at usage.c:172:0",
-            ])),
+            ]))
+            .unwrap(),
             Trace::parse_lines(Vec::from([
                 "ICF: index_mem at object-file.c:2370:4",
                 "  ICT: check_commit at object-file.c:2327:0",
@@ -1863,7 +1873,8 @@ mod tests {
                 "  RF: _ at gettext.h:49:1",
                 "CF: index_mem at object-file.c:0:0",
                 "  CT: die at usage.c:172:0",
-            ])),
+            ]))
+            .unwrap(),
             Some(BiHashMap::from_iter([
                 // JRS: Not the complete matching bimap,
                 // just enough for the pattern to succeed.

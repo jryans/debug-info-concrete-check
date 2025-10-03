@@ -39,8 +39,8 @@ impl<'content> Diff<'content> {
 impl<'content> From<TextDiff<'content, 'content, 'content, str>> for Diff<'content> {
     fn from(text_diff: TextDiff<'content, 'content, 'content, str>) -> Self {
         Diff::new(
-            Trace::parse_lines(text_diff.old_slices().to_vec()),
-            Trace::parse_lines(text_diff.new_slices().to_vec()),
+            Trace::parse_lines(text_diff.old_slices().to_vec()).unwrap(),
+            Trace::parse_lines(text_diff.new_slices().to_vec()).unwrap(),
             None,
             group_diff_ops(text_diff.ops().to_vec(), 1),
         )
