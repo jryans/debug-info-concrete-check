@@ -165,6 +165,14 @@ fn main() -> Result<()> {
                 return Ok(None);
             }
 
+            if before_content.is_empty() != after_content.is_empty() {
+                progress.inc(1);
+                return Err(anyhow!(
+                    "One side is empty while the other is not ({})",
+                    before_file.display()
+                ));
+            }
+
             let result = panic::catch_unwind(|| {
                 let mut diff: Diff = match cli.diff_strategy {
                     DiffStrategy::Text => Diff::from(
