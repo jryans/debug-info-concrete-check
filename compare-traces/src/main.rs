@@ -144,6 +144,7 @@ fn main() -> Result<()> {
     // Collect separate analyses per file pair in parallel
     let separate_analyses: Vec<_> = (0..before_files.len())
         .into_par_iter()
+        .with_max_len(1)
         .map(|i| {
             let mut divergence_analysis: Option<DivergenceAnalysis> = None;
             if !cli.no_report {
