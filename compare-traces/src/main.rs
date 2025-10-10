@@ -60,14 +60,6 @@ struct Cli {
     #[arg(long)]
     parse_only: bool,
 
-    /// Show trace diff
-    #[arg(long)]
-    diff: bool,
-
-    /// Disable analysis and reporting of trace divergences
-    #[arg(long)]
-    no_report: bool,
-
     /// Strategy to use when comparing traces to reveal divergences
     #[arg(long, value_enum, default_value_t = DiffStrategy::Tree)]
     diff_strategy: DiffStrategy,
@@ -79,6 +71,14 @@ struct Cli {
     /// Whether to save traces to new files just after the inlining transform
     #[arg(long)]
     save_after_inlining_transform: bool,
+
+    /// Show trace diff
+    #[arg(long)]
+    diff: bool,
+
+    /// Disable analysis and reporting of trace divergences
+    #[arg(long)]
+    no_report: bool,
 
     #[command(flatten)]
     verbose: clap_verbosity_flag::Verbosity,
