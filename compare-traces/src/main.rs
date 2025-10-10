@@ -72,6 +72,10 @@ struct Cli {
     #[arg(long)]
     save_after_inlining_transform: bool,
 
+    /// Stop after saving traces returned by inlining transform
+    #[arg(long)]
+    save_only: bool,
+
     /// Show trace diff
     #[arg(long)]
     diff: bool,
@@ -245,6 +249,11 @@ fn main() -> Result<()> {
                                 BufWriter::new(File::create(after_file_inlining_path)?);
                             write!(&mut after_file_inlining, "{}", after)?;
                             after_file_inlining.flush()?;
+                        }
+
+                        if cli.save_only {
+                            progress.inc(1);
+                            return Ok(None);
                         }
 
                         Diff::from(diff_tree(before, after))
