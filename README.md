@@ -3,7 +3,7 @@
 This repo includes various debug info concrete consistency checking tools
 developed as part of our OOPSLA 2026 paper:
 
-Debugging Debugging Information Using Dynamic Call Trees
+Debugging Debugging Information using Dynamic Call Trees
 
 by J. Ryan Stinnett and Stephen Kell.
 
