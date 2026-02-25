@@ -1,7 +1,7 @@
 ## Summary
 
 This repo includes various debug info concrete consistency checking tools
-developed as part of our OOPSLA 2026 paper:
+developed as part of our [OOPSLA 2026 paper][paper]:
 
 Debugging Debugging Information using Dynamic Call Trees
 
@@ -45,7 +45,7 @@ that make use of these projects. You may wish to start there when trying out
 these tools.
 
 [paper]:
-  TODO
+  https://doi.org/10.1145/3798213
 [artifact]:
   https://github.com/jryans/debug-info-concrete-check
 [QBDI]:
