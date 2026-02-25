@@ -40,13 +40,14 @@ leading to various call tree divergences when comparing traces.
 
 ## Usage
 
-The artifact for our paper contains various experiments and surrounding scripts
-that make use of these projects. You may wish to start there when trying out
-these tools.
+The [artifact][artifact] for our paper contains 
+various experiments and surrounding scripts
+that make use of these projects. 
+You may wish to start there when trying out these tools.
 
 [paper]:
   https://doi.org/10.1145/3798213
 [artifact]:
-  https://github.com/jryans/debug-info-concrete-check
+  https://github.com/jryans/debug-info-consistency-concrete-artifact
 [QBDI]:
   https://qbdi.quarkslab.com/
